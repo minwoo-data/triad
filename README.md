@@ -49,8 +49,8 @@ stops provoking objections.
 - **Small, obvious changes** — the overhead of three parallel agents
   exceeds the signal
 - **Routine bug fixes** — just fix the bug
-- **Code you want to iteratively improve** — triad never modifies code,
-  use an iterative code-review tool for that
+- **Code you want to iteratively improve** — triad never modifies code;
+  use an iterative code-refinement tool (e.g. [mangchi](https://github.com/minwoo-data/mangchi)) for that
 - **Pure natural-language prose** that isn't instruction-like — the LLM
   lens and architect lens have less to say about creative writing
 
