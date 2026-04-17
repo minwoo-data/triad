@@ -6,6 +6,15 @@
 > Each study anonymizes project identity while preserving deliberation
 > mechanics, perspective outputs, and aggregate metrics.
 
+> **⚠️ Evidence strength: n=1 so far.** One case study is weak positive
+> evidence for the 3-lens design — it shows the lenses *can* produce
+> complementary findings, not that they *will* under all conditions.
+> "0 cross-perspective conflicts" in Case Study 1 means the lenses
+> agreed on what they disagreed about — **not that they are orthogonal**.
+> Treat this file as a smoke test, not a benchmark. Second case study
+> on a different project type is needed before claiming the lens design
+> generalizes.
+
 ---
 
 ## Case Study 1 — Project Instruction File Deliberation

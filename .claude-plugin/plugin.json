@@ -1,7 +1,7 @@
 {
   "name": "triad",
   "version": "0.1.1",
-  "description": "3-perspective deliberation on one document or code file — LLM clarity, architectural longevity, end-user comprehension — parallel subagents until consensus.",
+  "description": "3-perspective deliberation on one document or code file \u2014 LLM clarity, architectural longevity, end-user comprehension \u2014 parallel subagents until consensus.",
   "author": {
     "name": "Minwoo Park",
     "url": "https://github.com/minwoo-data"

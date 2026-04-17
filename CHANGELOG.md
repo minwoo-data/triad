@@ -5,6 +5,53 @@ All notable changes to the Triad plugin are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.1.1] — 2026-04-17
+
+Polish release after pre-public-release `/review-all` sweep. Same 3-lens
+mechanic; fixes frontmatter blocker, clarifies positioning vs `/review-all`,
+walks back over-claimed orthogonality.
+
+### Added
+- **`.claude-plugin/marketplace.json`** — so `/plugin marketplace add
+  minwoo-data/triad` and `/plugin install triad@triad` actually work. v0.1.0
+  shipped README instructions for the marketplace route but lacked the
+  manifest, so the command silently failed. Manual clone remains as fallback.
+- **`.claude-plugin/plugin.json`** — single-plugin manifest for auto-discovery
+  (name, version 0.1.1, author, repo, keywords).
+- **Differentiation matrix at top of SKILL.md** — spells out "when triad vs
+  `/review-all` vs `/review-devil` vs mangchi." The #1 user question
+  ("is this YAGNI given /review-all exists?") deserves an explicit answer
+  instead of burying overlap behind 4 lines at the bottom.
+- **Cost envelope paragraph** — typical vs worst-case Claude subagent call
+  count, and a note that `/review-all` is ~25% the cost for one-shot reviews.
+
+### Changed
+- **Frontmatter**: added `user-invocable: true` and `argument-hint` — without
+  these, slash-command triggers documented in the body did not fire on a
+  clean install. Silent blocker for every first-time user.
+- **Frontmatter description**: rewritten from generic feature list to
+  differentiation-first ("use over /review-all when you need audit trail +
+  convergence delta + write-discipline"). Catalogue browsers get the
+  decision framework at first glance.
+- **Author history rewritten** via `git filter-branch` to attribute
+  consistently to minwoo-data (prior commits were under a work account from
+  local git config at the time).
+
+### Fixed
+- **Phase 3 intro vs table contradiction on `updated.md` creation**: intro
+  said "main only updates updated.md" while the table's first row said
+  "updated.md NOT created when no --apply." Intro now correctly reflects
+  that updated.md is only created when `--apply` is specified.
+- **CASE-STUDIES.md "0 cross-perspective conflicts" framing** — softened
+  from implicit "lens orthogonality proven" to explicit n=1 disclaimer:
+  weak positive evidence of complementarity, not proof of orthogonality.
+  Second case study on a different project type is needed before the lens
+  design can be claimed to generalize.
+
+### Not Changed
+- Agent perspectives, YAML schema, round/consensus templates, termination
+  logic (3-PASS consensus, R5 cap, AND-gate). All mechanics preserved.
+
 ## [0.1.0] — 2026-04-15
 
 Initial public release.

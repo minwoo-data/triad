@@ -1,12 +1,30 @@
 ---
 name: triad
-description: Review one document or code file through three fixed lenses (LLM clarity, architecture longevity, end-user 5-min understanding). Rounds accumulate until consensus; hard cap 5. Code is always read-only; markdown writes to updated.md (original untouched unless --apply=original). Triggers on "/triad <file>", "triad로 검토", "3관점 리뷰".
+user-invocable: true
+argument-hint: "<file> [--apply|--apply=original] | --continue <slug> | --stop <slug>"
+description: 3-perspective deliberation on one document or code file — LLM clarity, architecture longevity, end-user 5-min understanding. Multi-round convergence until consensus; hard cap 5. Code is read-only; markdown writes to updated.md unless --apply=original. Use over /review-all when you need audit trail + convergence delta + write-discipline; /review-all for one-shot checks.
 ---
 
 # Triad — 3-Perspective Deliberation
 
 > Triad는 문서/코드 **하나**를 3 관점으로 숙의하고 라운드별로 파일에 누적한다.
 > 코드는 절대 수정하지 않는다. md는 `--apply`로 `updated.md`를 생성하고, 원본 교체는 `--apply=original`일 때만 수행한다.
+
+## When to use — differentiation matrix
+
+> `/triad` is NOT "same as /review-all but three agents" — it's a different tool with different artifacts. Pick the right one:
+
+| 상황 | 도구 | 이유 |
+|------|------|------|
+| 문서가 6개월 이상 살 예정 + AI가 읽을 예정 + 감사 기록 필요 | **`/triad`** | 다라운드 convergence, state.json, 고정 3 lens, updated.md write discipline |
+| 한 번 훑고 끝, 복잡한 기록 불필요 | `/review-all` | 4-agent 병렬 + 즉시 synthesis, 가벼움 |
+| 약점만 빠르게 보고 싶음 | `/review-devil` | Devil's Advocate 단독, 1 agent |
+| 코드 파일을 실제로 수정해야 함 | `/mangchi` (code) | Claude↔Codex 적대적 반복 편집 |
+
+**Cost envelope** (typical):
+- 2 라운드에 수렴 → 6 agent calls, ~60-90초, Claude 토큰만 (Codex 안 씀).
+- 최악: R5 cap → 15 calls. Review-all(4 calls) 대비 **3-4배 비용**.
+- 비용 민감하면 `/review-all` 먼저 돌리고 불만족일 때만 `/triad`.
 
 ## 핵심 가치
 
@@ -81,7 +99,7 @@ open_questions:
 5. 다음 라운드로 이월할 open issues
 
 ### Phase 3: 반영 판단 (메인)
-기본 원칙: **메인은 `updated.md`만 갱신**. 원본 파일은 사용자가 명시적으로 허용해야만 건드린다.
+기본 원칙: **메인은 권고만 누적** (`round-N.md`). `updated.md`는 `--apply`가 명시되었을 때만 생성. 원본 파일은 `--apply=original`이 있을 때만 Edit. 코드는 항상 read-only.
 
 | 입력 유형 | 플래그 | 동작 |
 |---|---|---|
