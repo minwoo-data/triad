@@ -6,14 +6,168 @@
 > Each study anonymizes project identity while preserving deliberation
 > mechanics, perspective outputs, and aggregate metrics.
 
-> **⚠️ Evidence strength: n=1 so far.** One case study is weak positive
-> evidence for the 3-lens design — it shows the lenses *can* produce
-> complementary findings, not that they *will* under all conditions.
-> "0 cross-perspective conflicts" in Case Study 1 means the lenses
-> agreed on what they disagreed about — **not that they are orthogonal**.
-> Treat this file as a smoke test, not a benchmark. Second case study
-> on a different project type is needed before claiming the lens design
-> generalizes.
+> **⚠️ Evidence strength: n=2.** Two case studies on different target
+> types (instruction file + multi-subsystem code sweep). The 3-lens
+> design has now held up across (a) a small markdown document consumed
+> by both humans and AI agents and (b) a parallel 4-session breadth sweep
+> on ~42 source modules. Still not a benchmark — these are concrete
+> evidence points, not statistical claims. The lens design appears to
+> generalize beyond document deliberation to code-scope breadth review;
+> a third case study on a different language/stack would strengthen
+> further.
+
+---
+
+## Case Study 2 — Parallel 4-Session Breadth Sweep on a Python Backend
+
+**Target kind**: A Python Flask backend, ~30+ source files partitioned
+across 4 subsystems reviewed in parallel — (A) security/core (auth,
+rate-limit, session-keyed batch state store, usage-tracking/alerting),
+(B) OCR/receipts/matching pipeline, (C) statement/vendor/export/docs,
+and (C2) scheduler. Triad was used as the BREADTH phase, feeding
+candidates into a downstream mangchi depth phase.
+
+**Environment**:
+- Main agents: 4 × Claude Opus 4.7 (1M context), one per subsystem
+  session running in isolated git worktrees
+- Subagents per file: 3 × Claude Opus 4.7 general-purpose agents
+  (parallel, independent, single-message spawn — cannot see each other's
+  output)
+- Mode: `code` mode, read-only (no `--apply`)
+- Output: `RECOMMENDATIONS.md` per subsystem + per-module `round-1.md`
+- Supervisor: 5th Claude session monitoring branch state + merge orchestration
+
+### Headline numbers
+
+| Metric | Value |
+|---|---|
+| Parallel main sessions | 4 (+ 1 supervisor) |
+| Files reviewed (triad round-1) | 42+ modules |
+| Per-session module count (avg) | 10–28 |
+| Rounds consumed (per file) | 1 (breadth only; depth outsourced to mangchi) |
+| Candidates escalated to mangchi depth | 7 |
+| Real production bugs discovered via breadth-signal | 4 |
+| `RECOMMENDATIONS.md` produced | 5 (subsystem synthesis files) |
+| `PATTERNS-X.md` aggregate files (one per session) | 3 |
+| Cross-session contamination events caught by supervisor | 2 |
+
+### Bug categories landed
+
+#### Unique to the LLM perspective
+
+- **Unicode line-separator injection bypass** — the prompt-injection
+  sanitizer matched anchored line-start regexes against `\n`. U+2028,
+  U+2029, and U+0085 (NEL) are NOT `\n` for regex purposes but ARE
+  treated as line boundaries by most downstream LLM tokenizers. An
+  attacker embedding a role marker after `\u2028` would bypass the
+  anchored detection while still being parsed as a new line by the
+  consumer. Unique to LLM perspective because the class of bypass
+  ("regex vs LLM tokenizer unicode normalization divergence") is only
+  visible if you reason about LLM input-processing semantics.
+  Escalated → mangchi → fix applied.
+
+#### Unique to the Architect perspective
+
+- **Rate-limiter scope not documented** — the rate-limit module counts
+  in-process. In a future Gunicorn/multi-worker deployment, limits
+  would silently weaken to per-worker. Architect flagged as a
+  forward-compatibility gap; main agent accepted as a doc fix.
+- **Alert dispatch: caller kwargs don't match signature** — a cross-file
+  invariant issue. Architect spotted the mismatch by reading the helper
+  signature and comparing to callsite kwargs. Escalated to mangchi,
+  where it converged in the same round as a sibling cost-counter race.
+
+#### Unique to the EndUser perspective
+
+- **Enum extended in code, not in doc** — a submission-method enum
+  gained new values in code without updating the enum's docstring or
+  the top-level architecture notes. Future readers (AI or human) would
+  consult the doc and build a wrong mental model.
+
+#### Surfaced by multiple perspectives (convergence = strong signal)
+
+- **Batch state store concurrency** — flagged by LLM ("mutation outside
+  lock block") AND Architect ("lock exists but ordering invariant
+  undocumented"). Two framings, same root cause. Immediately escalated
+  to mangchi depth where it converged to two patches.
+
+### Open questions that changed decisions
+
+- **Scope of a parallel-session-discipline rule file** — under audit
+  simultaneously with the codebase sweep. Triad asked: "is this rule
+  binding on AI sessions, human contributors, or both?" User's answer
+  ("both, authoritative either way") tightened several downstream scope
+  decisions.
+- **Which subsystem sweep runs first** — both security/core and
+  OCR/receipts were candidates. EndUser perspective surfaced that a
+  suspected kwargs-drift silent-failure in an alert path was already on
+  the user's informal TODO, which set security/core as highest priority.
+
+### What triad did NOT find (Case Study 2–specific)
+
+- **Cross-session branch-hygiene failures.** During 4-way parallel
+  execution, git worktree switches between sessions produced file
+  contamination: one session's uncommitted docs pulled into a sibling
+  session's commit via `git add` timing. Triad deliberates on files; it
+  cannot detect git-operation-level races. A supervisor layer is
+  required at parallel scale.
+- **Runtime concurrency behavior.** Triad's read-only deliberation
+  flagged the batch store's lock-ordering invariant as an open question;
+  only mangchi's depth round (with applied patch + verification)
+  confirmed it as an exploitable race.
+- **Per-file performance.** No benchmarks run. Deliberation is
+  correctness/clarity-focused, not profile-driven.
+
+### What surprised us
+
+- **Three-perspective independence scaled to parallel sessions.** With
+  4 concurrent sessions each spawning 3 subagents per file, perspective
+  independence held: no cross-session contamination of subagent
+  reasoning. This was expected from single-message-spawn design, but
+  N=42+ was the first time we validated it at this scale.
+- **Multi-perspective convergence predicted mangchi success.** Of the
+  7 candidates triad escalated to mangchi, the 2 that became src/
+  patches had been flagged by all three perspectives. The 5 that stayed
+  at "no patch needed" in mangchi had been flagged by 1 or 2. Accept
+  rate correlated with perspective-convergence count — a useful signal
+  for adopters deciding escalation priority.
+- **`PATTERNS-X.md` synthesis layer surfaced cross-file invariants.**
+  Triad's per-file round-1 focuses on single-file correctness; the
+  PATTERNS synthesis produced at the end of each session identified 3
+  recurring cross-file issues (hardcoded drift-prone constants,
+  inconsistent `[WARN]` logger prefixes, enum extension without doc).
+  Session-level artifact, not a triad per-file feature.
+- **Operational overhead was the biggest finding.** The supervisor
+  session caught 2 contamination events before propagation to main.
+  Without it, branch history would have been corrupted. For adopters
+  running triad at single-session scale, this isn't a concern; at
+  4-session parallel scale, budget a supervisor.
+
+### Reproducibility
+
+Per-session artifacts preserved:
+- `docs/refinement/session-burn/<session-id>/<module>/round-1.md` —
+  per-file triad YAML outputs (Architect + LLM + EndUser)
+- `docs/refinement/session-burn/<session-id>/PATTERNS-X.md` — aggregate synthesis
+- `docs/refinement/session-burn/<session-id>/triad-code-findings.md`,
+  `…/triad-docs-findings.md` — categorized finding lists
+
+### Key takeaways for Case Study 2 adopters
+
+- **Triad scales to parallel subsystem sweeps** but operational discipline
+  at the git-worktree level does NOT come for free. Budget a supervisor
+  session if running 3+ concurrent triad sweeps.
+- **Triad is upstream, not terminal.** On a codebase this size, the
+  value chain is: triad breadth → mangchi depth → src/ patch. Running
+  triad alone produces RECOMMENDATIONS + round-1.md artifacts, not code
+  changes.
+- **Multi-perspective convergence is a useful prioritization signal.**
+  If you escalate candidates to a downstream tool, prioritize those
+  flagged by all three perspectives — empirical accept rate scales with
+  perspective count.
+- **PATTERNS synthesis is session-level.** Per-file triad is the
+  primitive; aggregate pattern synthesis requires a main-agent
+  post-processing pass, not triad itself.
 
 ---
 

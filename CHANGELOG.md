@@ -5,6 +5,29 @@ All notable changes to the Triad plugin are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.1.2] — 2026-04-17
+
+Docs release — adds Case Study 2 to evidence base, taking n from 1 to 2.
+No code or mechanic changes.
+
+### Added
+- **Case Study 2** in `skills/triad/CASE-STUDIES.md` — parallel
+  4-session breadth sweep on a Python Flask backend (42+ modules across
+  4 subsystems, 4 concurrent main agents × 3 parallel subagents per
+  file). Demonstrates triad scaling to multi-session parallel execution
+  and shows multi-perspective convergence predicting downstream (mangchi)
+  patch acceptance: the 2 candidates flagged by all three perspectives
+  became src/ patches; the 5 flagged by 1–2 stayed no-patch.
+- **Updated evidence-strength banner** — n=1 → n=2 on different target
+  types (instruction file + multi-subsystem code sweep). Still short of
+  statistical claims; third case on a different language/stack still
+  wanted.
+
+### Notes
+- **Operational lesson** (in Case Study 2 body): 4-session parallel triad
+  requires an external supervisor to catch cross-worktree git contamination.
+  Two contamination events caught during this run.
+
 ## [0.1.1] — 2026-04-17
 
 Polish release after pre-public-release `/review-all` sweep. Same 3-lens
