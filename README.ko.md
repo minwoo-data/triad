@@ -100,11 +100,11 @@ Triad는 **"결정 직전"에 가장 유용**. 한 번 합의된 문서가 downs
 ### 플러그인 설치
 
 ```bash
-# 마켓플레이스 (출시 후)
-/plugin marketplace add https://github.com/minwoo-data/triad
-/plugin install triad
+# 권장: Claude Code 플러그인 마켓플레이스
+/plugin marketplace add minwoo-data/triad
+/plugin install triad@triad
 
-# 수동
+# 또는 수동 설치 (marketplace route가 안 되는 환경)
 git clone https://github.com/minwoo-data/triad ~/.claude/skills/triad-src
 cp -r ~/.claude/skills/triad-src/skills/triad ~/.claude/skills/
 ```

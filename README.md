@@ -121,11 +121,11 @@ Runs entirely within Claude Code.
 ### Plugin install
 
 ```bash
-# marketplace (once published)
-/plugin marketplace add https://github.com/minwoo-data/triad
-/plugin install triad
+# Preferred: via Claude Code plugin marketplace
+/plugin marketplace add minwoo-data/triad
+/plugin install triad@triad
 
-# manual
+# Or manual (marketplace route unavailable)
 git clone https://github.com/minwoo-data/triad ~/.claude/skills/triad-src
 cp -r ~/.claude/skills/triad-src/skills/triad ~/.claude/skills/
 ```

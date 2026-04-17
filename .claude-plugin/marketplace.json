@@ -1,0 +1,28 @@
+{
+  "name": "triad",
+  "owner": {
+    "name": "Minwoo Park",
+    "url": "https://github.com/minwoo-data"
+  },
+  "plugins": [
+    {
+      "name": "triad",
+      "source": "./",
+      "description": "3-perspective deliberation on one document or code file — LLM clarity, architectural longevity, end-user comprehension — parallel subagents until consensus.",
+      "version": "0.1.1",
+      "author": {
+        "name": "Minwoo Park",
+        "url": "https://github.com/minwoo-data"
+      },
+      "homepage": "https://github.com/minwoo-data/triad",
+      "repository": "https://github.com/minwoo-data/triad",
+      "license": "MIT",
+      "keywords": [
+        "deliberation",
+        "review",
+        "three-perspectives",
+        "consensus"
+      ]
+    }
+  ]
+}
