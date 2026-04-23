@@ -1,4 +1,4 @@
-# 트라이어드 (Triad) - 3-Perspective Deliberation
+# Triad - 3-Perspective Deliberation
 
 **Language**: **English** · [한국어](README.ko.md)
 
@@ -171,7 +171,7 @@ Restart Claude Code after install.
 /triad --stop billing                              # force close at current round
 ```
 
-Natural-language: *"triad로 검토해줘"*, *"3관점 리뷰"*, *"three-perspective review"*.
+Natural-language: *"three-perspective review"*. (Korean triggers available; see the Korean README.)
 
 See [`skills/triad/references/usage.md`](skills/triad/references/usage.md)
 for detailed examples including the `docs/discussion/<slug>/` output
