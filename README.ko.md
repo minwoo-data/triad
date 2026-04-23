@@ -99,14 +99,14 @@ Triad는 **"결정 직전"에 가장 유용**. 한 번 합의된 문서가 downs
 
 ### 플러그인 설치
 
-```bash
-# 권장: Claude Code 플러그인 마켓플레이스
-/plugin marketplace add minwoo-data/triad
-/plugin install triad@triad
+`triad` 는 haroom 플러그인 (ddaro, prism, mangchi) 과 함께 **haroom_plugin** aggregator 마켓플레이스를 통해 배포됩니다.
 
-# 또는 수동 설치 (marketplace route가 안 되는 환경)
-git clone https://github.com/minwoo-data/triad ~/.claude/skills/triad-src
-cp -r ~/.claude/skills/triad-src/skills/triad ~/.claude/skills/
+```bash
+# 1. haroom_plugin 마켓플레이스 등록 (처음 한 번만)
+/plugin marketplace add https://github.com/minwoo-data/haroom_plugin.git
+
+# 2. 플러그인 설치
+/plugin install triad
 ```
 
 설치 후 Claude Code **재시작**.

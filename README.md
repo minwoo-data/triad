@@ -120,14 +120,14 @@ Runs entirely within Claude Code.
 
 ### Plugin install
 
-```bash
-# Preferred: via Claude Code plugin marketplace
-/plugin marketplace add minwoo-data/triad
-/plugin install triad@triad
+`triad` is distributed through the **haroom_plugin** aggregator marketplace along with the other haroom plugins (ddaro, prism, mangchi).
 
-# Or manual (marketplace route unavailable)
-git clone https://github.com/minwoo-data/triad ~/.claude/skills/triad-src
-cp -r ~/.claude/skills/triad-src/skills/triad ~/.claude/skills/
+```bash
+# 1. Add the haroom_plugin marketplace (one time)
+/plugin marketplace add https://github.com/minwoo-data/haroom_plugin.git
+
+# 2. Install
+/plugin install triad
 ```
 
 Restart Claude Code after install.
