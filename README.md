@@ -210,6 +210,10 @@ See [`skills/triad/CASE-STUDIES.md`](skills/triad/CASE-STUDIES.md) for
 concrete examples of issues caught on real projects, with accept rates,
 perspective overlap analysis, and honest limits.
 
+## Updates
+
+- **2026-04-24** — Codex CLI `gpt-5.4` → `gpt-5.5` migration notes and benchmark ([docs/codex-5.4-to-5.5.md](docs/codex-5.4-to-5.5.md)). Read this before assuming a "model does not exist" error means your account is missing access.
+
 ## License
 
 MIT - see [`LICENSE`](LICENSE).

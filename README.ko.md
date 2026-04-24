@@ -190,6 +190,12 @@ docs/discussion/<slug>/
 
 ---
 
+## 업데이트
+
+- **2026-04-24** — Codex CLI `gpt-5.4` → `gpt-5.5` 마이그레이션 기록 및 벤치마크 ([docs/codex-5.4-to-5.5.md](docs/codex-5.4-to-5.5.md)). "model does not exist" 에러를 계정 문제로 단정하기 전에 먼저 읽어볼 것.
+
+---
+
 ## 라이선스
 
 MIT - [`LICENSE`](LICENSE) 참조.
