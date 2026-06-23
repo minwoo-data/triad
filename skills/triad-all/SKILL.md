@@ -74,7 +74,7 @@ user-invocable: true
 Wall time = max(Claude 3 parallel ≈ 30~40s, Codex 3 sequential ≈ 90~110s) ≈ **Codex wall로 결정** (주요 병목).
 
 각 엔진은 `agents/<lens>-perspective.md` 프롬프트 그대로 사용. 응답은:
-- Claude: Agent 반환값 (YAML 그대로)
+- Claude: Agent 반환값 (v1 펜스 블록 그대로)
 - Codex: `round-N.<engine>.<lens>.{prompt,codex}.txt` 파일에 저장
 
 ### Phase 2: 합성 + 승급 (메인)
@@ -181,15 +181,13 @@ fi
 
 cat >> "$PROMPT_FILE" <<'EOF'
 
-## 출력 포맷 (엄수, YAML 하나만)
-verdict: PASS | REVISE | BLOCK
-top_issues:
-  - severity: high | med | low
-    locus: "..."
-    problem: "..."
-    proposed_fix: "..."
-open_questions:
-  - "..."
+## 출력 포맷 v1 (엄수, 펜스 블록 하나)
+<<<TRIAD-FINDINGS v1>>>
+VERDICT | PASS|REVISE|BLOCK
+ISSUE | high|med|low | <locus> | <problem> -> <fix>
+QUESTION | <text>
+<<<END>>>
+(VERDICT 한 줄 필수. ISSUE/QUESTION 줄은 0개 이상. 블록 밖 자유 추론은 무시됨.)
 EOF
 
 # 2. context guard
@@ -200,33 +198,31 @@ if [ "$BYTES" -gt 180000 ]; then
 fi
 
 # 3. Codex 호출 (stdin)
-timeout 180 codex exec --dangerously-bypass-approvals-and-sandbox < "$PROMPT_FILE" > "$CODEX_OUT" 2>&1 || {
+timeout 180 codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check --output-last-message "$CODEX_OUT" < "$PROMPT_FILE" > "$CODEX_OUT.log" 2>&1 || {
   echo "[triad-all] WARN Codex call failed for ${LENS}" >&2
   echo "[fallback: codex-unavailable]" > "$CODEX_OUT"
 }
 ```
 
-### 출력 포맷 (gpt-5.5, CLI 0.125.0 기준)
+### 출력 파서 v1 (A: 구조화 파싱 + degrade)
 
-Codex stdout 패턴:
-```
-(prompt echo …)
-codex
-verdict: REVISE
-top_issues:
-  ...
-tokens used
-<N>
-```
+`<<<TRIAD-FINDINGS v1>>>` ~ `<<<END>>>` 펜스 블록만 파싱한다 (Claude Agent 반환값 / Codex stdout 공통):
+1. `^VERDICT\s*\|` 줄 -> verdict. `^ISSUE\s*\|` 줄 -> 이슈. `^QUESTION\s*\|` 줄 -> open_question.
+2. 펜스 밖은 전부 무시 - prompt echo, `^codex$`, `^tokens used$`, stderr `ERROR codex_core::session: failed to record rollout items: thread ... not found` 등 preamble/prose/잘림에 강건. ` ```yaml ``` ` fence 찾지 마라.
+2b. **Codex는 전체 응답을 2회 출력한다 -> 펜스가 2개면 첫 번째 블록만** 취한다. **권장:** codex 호출에 `--output-last-message FILE`를 주면 최종 메시지만 깨끗이 받아 중복 + hook/echo 노이즈가 소스에서 사라진다.
+3. **degrade (silent-drop 금지):** 펜스 부재 시 레거시 느슨 스캔(`^verdict:` / `severity:` 휴리스틱) 1회 fallback; 그래도 verdict 추출 불가 시 해당 lens를 `verdict=DEGRADED`로 표기하고 `ISSUE | med | <lens> | 출력 파싱 불가 -> raw 확인/재실행` 1건을 남긴다. **라운드 전체를 fail시키지 않는다.**
 
-**파서 규약**:
-1. ` ```yaml ... ``` ` fence 찾지 마라 (5.5는 안 쓴다).
-2. `^codex$` 마커 직후 `^verdict:`부터 시작, `^tokens used$`에서 종료.
+**버전 태그 v1 고정** - 포맷 변경 시 v2로 올리고 파서가 둘 다 읽게 한다 (skill 독립 사본 간 drift 감지).
 
-**무해한 stderr 경고** 필터링:
-```
-ERROR codex_core::session: failed to record rollout items: thread ... not found
-```
+### Tier 2: 결정론적 파서 (코드, 프로즈 파싱 대체)
+
+**v1.1 정정 (parse-triad.js 헤더가 정본):** 파서는 이제 (1) **모든 펜스 블록 스캔 → verdict 있고 issue 많은 블록 선택** - 첫 블록만 취하던 규칙은 example 펜스 선출력 시 진짜 리뷰를 누락시켜 폐기, (2) **severity 별칭 정규화**, (3) **degrade(verdict 부재) 시 이미 파싱한 issue 보존**(marker prepend, 교체 X), (4) zero-width는 토큰 비교에만 strip. 위 산문의 '첫 블록만'/loose-scan 표현은 구버전 - 코드가 우선.
+
+위 v1 추출을 LLM 눈대중 대신 **코드**로 한다. lens 출력이 `$CODEX_OUT`(또는 Claude agent 반환 파일)로 확정된 뒤:
+
+    node "<이 skill 디렉토리>/parse-triad.js" "$CODEX_OUT" "$LENS" > "$CODEX_OUT.json"
+
+→ `{lens, verdict, degraded, issues:[{severity,locus,text}], questions:[..]}`. synthesis는 이 **구조화 레코드**로 triage(cross-model 합의)한다. 첫 펜스 / 첫 verdict만, no-verdict→DEGRADED, malformed-skip 규칙이 파서에 박힘. 종결 판정(6-way PASS)도 `verdict` 필드로 결정론적. 자가 검증: `node parse-triad.js --selftest`.
 
 ### Fallback 정책
 
