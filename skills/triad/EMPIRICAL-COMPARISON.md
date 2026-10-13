@@ -2,6 +2,12 @@
 
 > First attempt at grounding triad's differentiated value in side-by-side
 > evidence. See also `CASE-STUDIES.md` for the original n=1 smoke test.
+>
+> **Historical note (2026-10):** `/review-all` and `/review-devil` were the
+> pre-release names of what is now `/prism` (classic lens set) and the
+> now-archived `prism-devil`. The bench target was a code file; since triad
+> 0.2.0 code inputs are refused (documents only), so this comparison is
+> kept as evidence of lens complementarity, not as a current usage guide.
 
 ---
 

@@ -2,7 +2,7 @@
 
 > Language: **English** · [한국어](README.ko.md)
 
-**Run a single file through three fixed-perspective reviewers until they all agree.**
+**Run a single document through three fixed-perspective reviewers until they all agree.**
 
 Docs get shipped with "looks fine" approval, then three weeks later they bite back: an AI agent can't parse them, the architecture aged badly, or a new hire gives up at minute six. triad runs three independent lenses on one file in parallel and keeps deliberating until all three pass.
 
@@ -10,10 +10,10 @@ Docs get shipped with "looks fine" approval, then three weeks later they bite ba
 /triad <file>                  -> read-only consensus (CONSENSUS.md)
 /triad <file> --apply          -> md: generate updated.md (original untouched)
 /triad <file> --apply=original -> md: also Edit the original
-/triad <code.py>               -> code: always read-only, RECOMMENDATIONS.md
+/triad <code.py>               -> refused: documents only (use /prism or /mangchi for code)
 ```
 
-Three subagents, three biases (LLM clarity / architectural longevity / end-user comprehension), one orchestrator. Round N only carries forward what round N-1 didn't resolve. Hard cap at round 5. Code is never modified — ever.
+Three subagents, three biases (LLM clarity / architectural longevity / end-user comprehension), one orchestrator. Round N only carries forward what round N-1 didn't resolve. Hard cap at round 5. **Documents only** since 0.2.0 — code files are routed to `/prism` (review) or `/mangchi` (iterative fix).
 
 ---
 
@@ -32,13 +32,12 @@ You write a design doc, one reviewer says "looks fine", you commit it. Three wee
 - **Project instruction docs** (`CLAUDE.md`, agent prompts, onboarding) — read by AI too, the LLM lens is especially valuable
 - **ADRs** (Architecture Decision Records) — verify the choice from three angles before committing
 - **Public-facing docs** (README, getting-started, API) — the end-user lens catches things readers silently give up on
-- **Code files you want thoroughly reviewed read-only** — triad never edits code, only produces `RECOMMENDATIONS.md`
 - **Before a PR** — triangulate the justification for the change
 
 ## Sibling tools (same marketplace)
 
 - **[ddaro](https://github.com/minwoo-data/ddaro)** — worktree-based parallel Claude Code sessions with safe merge.
-- **[prism](https://github.com/minwoo-data/prism)** — 5-angle parallel code review with singleton verification (wider, one-shot).
+- **[prism](https://github.com/minwoo-data/prism)** — evidence-graded 5-lens code review (one-shot). **Use this for code**; triad is for documents.
 - **[mangchi](https://github.com/minwoo-data/mangchi)** — iterative code refinement loop with Claude + Codex cross-review.
 
 ---
@@ -64,7 +63,7 @@ You write a design doc, one reviewer says "looks fine", you commit it. Three wee
 ```
 /triad docs/features/billing.md          # three-lens review, read-only
 /triad docs/features/billing.md --apply  # also produce updated.md
-/triad src/routes/auth.py                # code mode, read-only
+/prism src/routes/auth.py                # code? not triad — use prism (or /mangchi to fix)
 ```
 
 Restart Claude Code after install/update.
@@ -116,7 +115,7 @@ Each agent runs in a forked context so the main conversation stays clean. Agents
 ## Features
 
 - **Round-delta** — round N only sees unresolved issues from round N-1. Resolved items never get re-litigated, so consensus files stay short.
-- **Input-aware write permission** — markdown can be modified (explicit `--apply` / `--apply=original`); code files are read-only regardless of flags. Hard invariant.
+- **Explicit write permission** — the original is modified only with `--apply=original`; `--apply` writes `updated.md` next to it. Code files are not accepted at all (0.2.0+).
 - **Fork isolation** — subagents can't see each other's answers, so agreement is independent signal, not echo.
 - **Fallback with loud tagging** — if a subagent fails to spawn or crashes, the main agent falls back to a local pass and tags the round `[fallback: main-local-pass]`. No silent quality drop.
 - **Natural termination** — three PASS verdicts **AND** zero open questions. Any slip sends you to the next round. Hard cap at round 5.
@@ -127,10 +126,10 @@ Each agent runs in a forked context so the main conversation stays clean. Agents
 
 | Input | Default | `--apply` | `--apply=original` |
 |---|---|---|---|
-| `.md` | Original untouched, no changes | `updated.md` created/updated, original untouched | `updated.md` + original Edit |
-| `.py` / `.js` / code | Original untouched, `RECOMMENDATIONS.md` produced | `--apply` ignored with warning | `--apply=original` ignored with warning |
+| `.md` / `.mdx` / `.txt` / `.rst` (documents) | Original untouched, no changes | `updated.md` created/updated, original untouched | `updated.md` + original Edit |
+| `.py` / `.js` / `.ts` / code | **Refused** | Refused | Refused |
 
-**Code files are never modified.** If you want to mutate code, that's a different tool's job (try `/mangchi`).
+**Code files are not accepted (0.2.0+).** triad prints a one-line pointer to `/prism <file>` (evidence-graded review) or `/mangchi <file>` (iterative fix) and stops. Reason: on code, the Architect lens asks the same questions as mangchi's `design` axis and prism's Testability lens, so triad was a duplicate tool there. One route per input type: documents → triad, code → prism/mangchi.
 
 ## Termination conditions
 
@@ -153,7 +152,7 @@ docs/discussion/<slug>/
 └── updated.md             # only if --apply was used (md inputs)
 ```
 
-For code inputs, the path is `docs/discussion/code/<slug>/` and the final artifact is `RECOMMENDATIONS.md` in a format compatible with downstream code-generation tools. `/triad-codex` and `/triad-all` write into `docs/discussion/codex/<slug>/` and `docs/discussion/all/<slug>/` respectively.
+`/triad-codex` and `/triad-all` write into `docs/discussion/codex-md/<slug>/` and `docs/discussion/all-md/<slug>/` respectively. (The 0.1.x `docs/discussion/code/<slug>/` tree and `RECOMMENDATIONS.md` were removed with code-input support.)
 
 ---
 
@@ -179,12 +178,11 @@ cat docs/discussion/billing/updated.md
 # → Applied version, ready to move to docs/features/billing.md when you're happy
 ```
 
-### Code review mode (always read-only)
+### Code file? Not here
 
 ```
 /triad src/routes/auth.py
-# → docs/discussion/code/auth-py/round-1.md ... RECOMMENDATIONS.md
-# → Source file is never touched. Apply recommendations with a different tool.
+# → "triad is documents-only. Use /prism <file> for review, /mangchi <file> for iterative fixes."
 ```
 
 ### Cross-model mode
@@ -254,7 +252,7 @@ See [`skills/triad/CASE-STUDIES.md`](skills/triad/CASE-STUDIES.md) for concrete 
 
 ## Philosophy
 
-Three reviewers who cannot see each other, with fixed questions that cannot drift, deliberating one file until consensus or cap. The round-delta rule keeps the document short — once something is settled, it stays settled. Markdown can move; code never does. If you need code to change, that's a different tool.
+Three reviewers who cannot see each other, with fixed questions that cannot drift, deliberating one file until consensus or cap. The round-delta rule keeps the document short — once something is settled, it stays settled. Documents only. For code, use `/prism` (review) or `/mangchi` (fix).
 
 ## Updates
 

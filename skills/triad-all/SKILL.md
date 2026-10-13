@@ -1,6 +1,6 @@
 ---
 name: triad-all
-description: Dual-engine 3-perspective deliberation. Runs the 3 lenses (LLM clarity / architecture longevity / end-user comprehension) on BOTH Claude subagents and Codex CLI in parallel, then promotes issues by cross-model agreement. Use for consequential files where you want the highest-confidence review. Triggers on "/triad-all <file>", "triad all로 검토", "크로스모델 3관점".
+description: Dual-engine 3-perspective deliberation on one markdown/document file. Runs the 3 lenses (LLM clarity / architecture longevity / end-user comprehension) on BOTH Claude subagents and Codex CLI in parallel, then promotes issues by cross-model agreement. Documents only (code → /prism-all). Use for consequential documents where you want the highest-confidence review. Triggers on "/triad-all <file>", "triad all로 검토", "크로스모델 3관점".
 argument-hint: "<file> [--apply] [--apply=original] [--continue <slug>] [--stop <slug>]"
 user-invocable: true
 ---
@@ -8,7 +8,7 @@ user-invocable: true
 # triad-all — Dual-Engine 3-Perspective Deliberation
 
 > 메인은 Claude (오케스트레이터). 매 라운드 **Claude 서브에이전트 3 + Codex CLI 3 = 6콜**을 병렬 발사하고, **같은 렌즈에서 두 엔진이 모두 잡은 이슈**를 최고 신뢰 티어로 승급한다.
-> 코드 파일은 절대 수정하지 않는다. md는 `--apply`로 `updated.md`를 생성하고, 원본 교체는 `--apply=original`일 때만.
+> **문서 전용** - 코드 파일은 거부한다 (코드는 `/prism-all`). md는 `--apply`로 `updated.md`를 생성하고, 원본 교체는 `--apply=original`일 때만.
 
 ## 핵심 가치 (cross-model agreement)
 
@@ -48,7 +48,13 @@ user-invocable: true
 - `/triad-all --stop <slug>` — 강제 종결
 - 자연어: "triad all로 검토", "크로스모델 3관점"
 
-슬러그: 확장자 제거 + 공백/특수문자 `-`로. 예: `src/routes/auth.py` → `auth-py`.
+**입력 유형**: 문서(`.md`/`.mdx`/`.txt`/`.rst` 등)만. 코드 확장자(`.py`/`.js`/`.ts`/...)면 라운드를 시작하지 않고 한 줄로 거부:
+
+```
+triad-all은 문서 전용입니다. 코드 리뷰는 /prism-all <file> (크로스모델 결함 탐지), 반복 수정은 /mangchi <file> 을 쓰세요.
+```
+
+슬러그: 확장자 제거 + 공백/특수문자 `-`로. 예: `docs/design/architecture.md` → `architecture`.
 
 ---
 
@@ -57,11 +63,9 @@ user-invocable: true
 ### Phase 0: 초기화 (메인)
 1. `codex --version ≥ 0.125.0` 확인. 부적합 시 중단.
 2. Codex 모델 결정 (config 기본 → 필요시 cache 폴백).
-3. 입력 파일 존재 확인.
-4. 슬러그 계산. 출력 디렉토리:
-   - 코드 입력: `docs/discussion/all/<slug>/`
-   - md 입력:  `docs/discussion/all-md/<slug>/`
-5. 원본 스냅샷 (`source.md` 또는 `source-snapshot.md`) 저장.
+3. 입력 파일 존재 확인 + **문서 파일인지 확인** (코드면 거부 후 종료).
+4. 슬러그 계산. 출력 디렉토리: `docs/discussion/all-md/<slug>/`
+5. 원본 스냅샷 (`source.md`) 저장.
 6. `state.json`: `{round: 1, status: "open", engine: "all", codex_version, codex_model, started_at, target_file}`.
 
 ### Phase 1: 6 병렬 실행 (메인)
@@ -73,7 +77,7 @@ user-invocable: true
 
 Wall time = max(Claude 3 parallel ≈ 30~40s, Codex 3 sequential ≈ 90~110s) ≈ **Codex wall로 결정** (주요 병목).
 
-각 엔진은 `agents/<lens>-perspective.md` 프롬프트 그대로 사용. 응답은:
+각 엔진은 `agents/<lens>-perspective.md` 프롬프트 그대로 사용. 프롬프트 순서는 **대상 문서 → 지난 합의 → 관점 정의 → 출력 포맷** (Claude Agent 프롬프트도 동일 순서 - 호출 템플릿 참조). 응답은:
 - Claude: Agent 반환값 (v1 펜스 블록 그대로)
 - Codex: `round-N.<engine>.<lens>.{prompt,codex}.txt` 파일에 저장
 
@@ -100,12 +104,11 @@ Wall time = max(Claude 3 parallel ≈ 30~40s, Codex 3 sequential ≈ 90~110s) �
 
 기존 triad와 동일:
 
-| 입력 | 플래그 | 동작 |
-|---|---|---|
-| 코드 | (모든 플래그) | 원본 불변, `RECOMMENDATIONS.md`만 누적 |
-| md | 없음 | 원본 불변, updated.md 생성 안 함 |
-| md | `--apply` | updated.md 생성/갱신 (원본 불변) |
-| md | `--apply=original` | 위 + 원본 md Edit |
+| 플래그 | 동작 |
+|---|---|
+| 없음 | 원본 불변, updated.md 생성 안 함 |
+| `--apply` | updated.md 생성/갱신 (원본 불변) |
+| `--apply=original` | 위 + 원본 md Edit |
 
 ### Phase 4: 종결 판정
 
@@ -148,22 +151,17 @@ Codex 호출 로직은 이 skill이 자체 보유한다 (외부 공용 파일 �
 ### 호출 템플릿
 
 ```bash
-DIR="docs/discussion/all/<slug>"
+DIR="docs/discussion/all-md/<slug>"
 N="<round_number>"
 LENS="<llm|architect|enduser>"
 PROMPT_FILE="$DIR/round-${N}.codex.${LENS}.prompt.txt"
 CODEX_OUT="$DIR/round-${N}.codex.${LENS}.codex.txt"
 
-# 1. prompt 조립 (quoted heredoc)
+# 1. prompt 조립 (quoted heredoc). 순서: 대상 문서 → 지난 합의 → 관점 정의 → 출력 포맷.
+#    3 렌즈 공통인 앞부분(문서+합의)이 동일 prefix가 되어 프롬프트 캐시에 걸린다.
+#    관점을 앞에 두면 첫 토큰부터 달라져 캐시가 적중하지 않는다.
 cat > "$PROMPT_FILE" <<'EOF'
-[이 파일 내용을 읽고 <관점>으로만 평가하라]
-
-## 너의 관점 정의
-EOF
-
-cat "agents/${LENS}-perspective.md" >> "$PROMPT_FILE"
-
-cat >> "$PROMPT_FILE" <<'EOF'
+[아래 대상 파일을 읽고, 마지막에 주어지는 관점으로만 평가하라]
 
 ## 대상 파일
 EOF
@@ -178,6 +176,13 @@ if [ "$N" -ge 2 ]; then
 EOF
   cat "$DIR/round-$((N-1)).carryover.txt" >> "$PROMPT_FILE"
 fi
+
+cat >> "$PROMPT_FILE" <<'EOF'
+
+## 너의 관점 정의
+EOF
+
+cat "agents/${LENS}-perspective.md" >> "$PROMPT_FILE"
 
 cat >> "$PROMPT_FILE" <<'EOF'
 
@@ -239,29 +244,22 @@ timeout 180 codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-rep
 
 ```
 docs/discussion/
-├── all-md/<slug>/                        # md 입력
-│   ├── source.md
-│   ├── state.json
-│   ├── round-1.md                        # 6 responses + synthesis
-│   ├── round-1.codex.llm.prompt.txt
-│   ├── round-1.codex.llm.codex.txt
-│   ├── round-1.codex.architect.prompt.txt
-│   ├── round-1.codex.architect.codex.txt
-│   ├── round-1.codex.enduser.prompt.txt
-│   ├── round-1.codex.enduser.codex.txt
-│   ├── round-1.carryover.txt
-│   ├── CONSENSUS.md
-│   └── updated.md                        # --apply에서만
-│
-└── all/<slug>/                           # 코드 입력
-    ├── source-snapshot.md
+└── all-md/<slug>/
+    ├── source.md
     ├── state.json
-    ├── round-N.md
-    ├── round-N.codex.<lens>.prompt.txt
-    ├── round-N.codex.<lens>.codex.txt
+    ├── round-1.md                        # 6 responses + synthesis
+    ├── round-1.codex.llm.prompt.txt
+    ├── round-1.codex.llm.codex.txt
+    ├── round-1.codex.architect.prompt.txt
+    ├── round-1.codex.architect.codex.txt
+    ├── round-1.codex.enduser.prompt.txt
+    ├── round-1.codex.enduser.codex.txt
+    ├── round-1.carryover.txt
     ├── CONSENSUS.md
-    └── RECOMMENDATIONS.md
+    └── updated.md                        # --apply에서만
 ```
+
+(v0.1.x의 `docs/discussion/all/<slug>/` 코드 트리와 `RECOMMENDATIONS.md`는 코드 입력 폐기와 함께 제거됨.)
 
 Claude Agent 원본 응답은 Agent tool의 반환값으로만 존재 (별도 파일 저장 불필요 — round-N.md의 "Claude" 섹션에 기록됨).
 
@@ -278,7 +276,8 @@ node verify-independence.js --strict  # + Codex CLI ≥ 0.125.0 체크
 - ❌ 교차 합의(Tier 1)가 나왔는데 Tier 3 singleton으로 동등 취급 — confidence tier 준수.
 - ❌ 한쪽 엔진 실패 시 조용히 다른 쪽만으로 계속 — fallback 태그 + state.json 기록 필수.
 - ❌ argv로 Codex 프롬프트 전달 — 항상 tempfile + stdin.
-- ❌ 코드 파일을 `--apply` 류로 수정 — 거부.
+- ❌ 코드 파일을 입력으로 받아 라운드 진행 — 거부 후 `/prism-all`, `/mangchi` 안내.
+- ❌ 관점 정의를 프롬프트 맨 앞에 — 공통 prefix(대상 문서) 먼저.
 - ❌ 이미 합의된 쟁점을 다음 라운드에 재수록 — Round-Delta 위반.
 - ❌ 5 라운드 초과 — hard cap.
 - ❌ 다른 plugin/skill 파일을 참조 — 전역 hook이 차단.
@@ -289,6 +288,7 @@ node verify-independence.js --strict  # + Codex CLI ≥ 0.125.0 체크
 |---|---|---|
 | `/triad` | Claude 3 | Claude 토큰 여유 충분, 빠른 1-엔진 리뷰 |
 | `/triad-codex` | Codex 3 | Claude 토큰 아끼고 싶거나 다른 모델 관점 원할 때 |
-| `/triad-all` (이 skill) | Claude 3 + Codex 3 | 중요한 파일, 최고 신뢰, 양쪽 토큰 OK |
+| `/triad-all` (이 skill) | Claude 3 + Codex 3 | 중요한 문서, 최고 신뢰, 양쪽 토큰 OK |
+| `/prism-all` | Claude 5 + Codex 5 | **코드** 파일 (triad 계열은 문서 전용) |
 
 세 skill은 완전히 독립된 plugin으로 각자 자기 프롬프트·템플릿·Codex 규약을 보유한다. 하나만 설치해도 나머지 없이 동작.
