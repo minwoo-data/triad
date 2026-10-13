@@ -5,6 +5,80 @@ All notable changes to the Triad plugin are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] - 2026-10-13
+
+Documents-only release. Removes code-input support, fixes stale tool names,
+aligns the per-engine agent prompts, and reorders subagent prompts for
+prompt-cache reuse. Also back-fills the changelog for two previously
+unreleased commits (see 0.1.3 below).
+
+### Changed (breaking behavior)
+- **triad / triad-all / triad-codex accept documents only.** A code file
+  (`.py` / `.js` / `.ts` / ...) is refused with a one-line pointer to
+  `/prism <file>` (evidence-graded review) or `/mangchi <file>` (iterative
+  fix) and no session is created. Rationale: on code, the Architect lens
+  asked the same questions as mangchi's `design` axis and prism's
+  Testability lens, so triad was a duplicate tool for that input type.
+  One route per input type - documents → triad, code → prism/mangchi.
+- **Subagent prompt order**: target document (shared across the 3 lenses)
+  first, previous-round consensus next, perspective definition and output
+  format last. The shared prefix is now identical across the 3 calls, so
+  prompt caching can serve 2 of 3 inputs; the old order (perspective
+  first) diverged from token one. Applies to the Claude Agent prompt
+  template and the Codex heredoc template in all three skills.
+- **Compressed agent prompts aligned with the originals.** The
+  `triad-all` / `triad-codex` Architect prompt carried an extra item 8
+  ("불필요한 추가 (YAGNI 위반)") that `triad` lacked - the same lens was
+  defined differently per engine, which made cross-model agreement an
+  unfair comparison. Item 8 and its constraint/checklist lines are removed;
+  YAGNI is explicitly delegated to mangchi's `necessity` axis in all three
+  "지적하지 말 것" lists. Item sets (7 per lens) now match across the three
+  copies; wording may stay terse in the compressed ones.
+
+### Removed
+- `skills/triad/templates/recommendations.md` and every `RECOMMENDATIONS.md`
+  reference (SKILL.md ×3, templates, README ×2, usage.md, commands/triad.md).
+- `docs/discussion/code/<slug>/`, `docs/discussion/all/<slug>/`,
+  `docs/discussion/codex/<slug>/` output trees (code-input artifacts).
+  Existing directories are left alone; `--continue` applies to document
+  sessions only.
+- The "Code file (read-only)" option from the `/triad` no-argument menu.
+
+### Fixed
+- Stale `/review-all` and `/review-devil` references (pre-release names of
+  what is now `/prism` and the archived `prism-devil`) in the SKILL.md
+  differentiation matrix, usage.md, and the EMPIRICAL-COMPARISON header
+  (kept as historical evidence with a note).
+- Plugin manifests (`plugin.json`, `marketplace.json`) now say documents,
+  not "document or code file".
+
+### Not Changed
+- The 3 lenses, YAML schema, `<<<TRIAD-FINDINGS v1>>>` fence format,
+  `parse-triad.js`, round/consensus templates, termination logic
+  (3-PASS AND zero open questions, R5 cap), `--apply` write discipline.
+
+## [0.1.3] - 2026-06-22
+
+Back-filled entry: these commits shipped on `main` without a changelog
+line or version bump.
+
+### Added
+- **`triad-codex`** (2026-04-24) - the 3 lenses evaluated by Codex CLI
+  instead of Claude subagents (different-model opinion / Claude-token
+  saving). Codex ≥ 0.125.0 required; tempfile+stdin invocation only.
+- **`triad-all`** (2026-04-24) - dual-engine: 3 Claude subagents + 3 Codex
+  calls in parallel; issues flagged by both engines in the same lens are
+  promoted to Tier 1 (cross-model agreement). Termination = 6-way PASS.
+- `docs/codex-5.4-to-5.5.md` - Codex CLI migration write-up.
+- **`parse-triad.js`** (2026-06-22) in `triad-all` and `triad-codex` -
+  deterministic parser for the `<<<TRIAD-FINDINGS v1>>>` fence (scans all
+  fence blocks and picks the one with a verdict and the most issues;
+  normalizes severity aliases; preserves parsed issues on degrade).
+  Synthesis triages the structured record instead of eyeballing prose.
+  `--selftest` included.
+- `verify-independence.js` in both Codex-backed skills (required files +
+  cross-plugin reference check; `--strict` probes Codex CLI).
+
 ## [0.1.2] - 2026-04-17
 
 Docs release - adds Case Study 2 to evidence base, taking n from 1 to 2.

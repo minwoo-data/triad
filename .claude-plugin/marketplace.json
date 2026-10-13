@@ -8,8 +8,8 @@
     {
       "name": "triad",
       "source": "./",
-      "description": "3-perspective deliberation on one document or code file \u2014 LLM clarity, architectural longevity, end-user comprehension \u2014 parallel subagents until consensus.",
-      "version": "0.1.2",
+      "description": "3-perspective deliberation on one markdown/document file \u2014 LLM clarity, architectural longevity, end-user comprehension \u2014 parallel subagents until consensus. Documents only; code goes to /prism or /mangchi.",
+      "version": "0.2.0",
       "author": {
         "name": "haroom",
         "url": "https://github.com/minwoo-data"
