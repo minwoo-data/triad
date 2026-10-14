@@ -23,7 +23,12 @@ const REQUIRED_FILES = [
   'agents/enduser-perspective.md',
   'templates/round.md',
   'templates/consensus.md',
+  'parse-triad.js',
+  'codex-run.sh',
 ];
+
+// Load-bearing scripts: under --strict each must pass its own --selftest, not just exist.
+const SELFTEST_SCRIPTS = ['parse-triad.js', 'codex-run.sh'];
 
 // triad-all requires both Claude Code (ambient — cannot probe) and Codex CLI.
 // Claude Code presence is assumed (the skill can't run without it). Only Codex
@@ -146,11 +151,23 @@ function checkPrerequisites() {
   }
 }
 
+function checkScripts() {
+  for (const rel of SELFTEST_SCRIPTS) {
+    const runner = rel.endsWith('.sh') ? 'bash' : 'node';
+    try {
+      execSync(`${runner} "${path.join(SELF_DIR, rel)}" --selftest`, { stdio: ['ignore', 'ignore', 'ignore'] });
+      ok(`selftest passed: ${rel}`);
+    } catch (e) {
+      fail(`selftest FAILED: ${rel} (\`${runner} ${rel} --selftest\` exited non-zero)`);
+    }
+  }
+}
+
 function main() {
   const strict = process.argv.includes('--strict');
   checkRequiredFiles();
   checkNoCrossRefs();
-  if (strict) checkPrerequisites();
+  if (strict) { checkScripts(); checkPrerequisites(); }
   process.stdout.write(`[verify-independence:${SELF_NAME}] PASS — skill is self-contained\n`);
   process.exit(0);
 }
