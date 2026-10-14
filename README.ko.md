@@ -37,7 +37,7 @@
 ## 자매 도구 (같은 마켓플레이스)
 
 - **[ddaro](https://github.com/minwoo-data/ddaro)** — worktree 기반 병렬 Claude Code 세션 + 안전한 merge.
-- **[prism](https://github.com/minwoo-data/prism)** — 증거 기반 5-렌즈 코드 리뷰 (1회성). **코드는 이걸로**; triad는 문서용.
+- **[prism](https://github.com/minwoo-data/prism)** — 증거 기반 5-렌즈 코드 리뷰 (1회성). **코드는 이걸로.** 설계 문서에서는 prism의 design 렌즈셋이 설계가 *맞는지*(충돌·코드 대비 주장·실패 모드)를, triad가 문서가 *잘 쓰였는지*를 본다. `/ddaro:review`가 둘 다 돌린다.
 - **[mangchi](https://github.com/minwoo-data/mangchi)** — Claude + Codex cross-review로 파일 반복 다듬기.
 
 ---

@@ -5,6 +5,19 @@ All notable changes to the Triad plugin are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.2.1] - 2026-10-13
+
+### Changed
+- **Codex calls pin `model_reasoning_effort=high` and a 300 s timeout** (triad-all was 180 s,
+  triad-codex 120 s, both followed the `~/.codex/config.toml` default effort). xhigh exhausts the
+  Codex usage limit within a few calls. Override per run with `TRIAD_CODEX_EFFORT`
+  (low/medium/high/xhigh/max/ultra) and `TRIAD_CODEX_TIMEOUT` (seconds); for max and above set the
+  timeout to 480+. Measured on CLI 0.159.3 with a 24 KB prompt: high 44 s, xhigh 113 s, max 227 s.
+  Ported from the unreleased `feat/codex-effort` work.
+- Differentiation matrix and READMEs: a design doc has two separate questions. prism ≥0.3.1
+  (design lens set) checks whether the design is *sound*; triad checks whether the document is
+  *well written*. `/ddaro:review` runs both. triad itself stays documents-only.
+
 ## [0.2.0] - 2026-10-13
 
 Documents-only release. Removes code-input support, fixes stale tool names,

@@ -1,5 +1,6 @@
 {
   "name": "triad",
+  "description": "Standalone marketplace for triad (3-perspective document deliberation). The haroom_plugins marketplace ships triad together with prism, mangchi, ddaro and galmuri.",
   "owner": {
     "name": "haroom",
     "url": "https://github.com/minwoo-data"
@@ -8,8 +9,8 @@
     {
       "name": "triad",
       "source": "./",
-      "description": "3-perspective deliberation on one markdown/document file \u2014 LLM clarity, architectural longevity, end-user comprehension \u2014 parallel subagents until consensus. Documents only; code goes to /prism or /mangchi.",
-      "version": "0.2.0",
+      "description": "3-perspective deliberation on one markdown/document file — LLM clarity, architectural longevity, end-user comprehension — parallel subagents until consensus. Documents only; code goes to /prism or /mangchi.",
+      "version": "0.2.1",
       "author": {
         "name": "haroom",
         "url": "https://github.com/minwoo-data"

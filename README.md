@@ -37,7 +37,7 @@ You write a design doc, one reviewer says "looks fine", you commit it. Three wee
 ## Sibling tools (same marketplace)
 
 - **[ddaro](https://github.com/minwoo-data/ddaro)** — worktree-based parallel Claude Code sessions with safe merge.
-- **[prism](https://github.com/minwoo-data/prism)** — evidence-graded 5-lens code review (one-shot). **Use this for code**; triad is for documents.
+- **[prism](https://github.com/minwoo-data/prism)** — evidence-graded 5-lens code review (one-shot). **Use this for code.** On a design doc, prism's design lens set checks whether the design is *sound* (conflicts, claims vs code, failure modes) while triad checks whether the document is *well written*; `/ddaro:review` runs both.
 - **[mangchi](https://github.com/minwoo-data/mangchi)** — iterative code refinement loop with Claude + Codex cross-review.
 
 ---
