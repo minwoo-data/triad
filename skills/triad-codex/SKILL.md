@@ -139,7 +139,7 @@ triad-codex는 문서 전용입니다. 코드 리뷰는 /prism-codex <file>, 반
 3. **Heredoc quoted** — prompt body 작성 시 `<<'EOF'` (single-quoted)로 shell expansion 차단.
 4. **Dynamic content는 파일 append** — 대상 소스, 이전 라운드 decisions digest 등 **모든 동적 섹션은 `cat <source_file> >> "$PROMPT_FILE"` 패턴만 허용**. `echo "$VAR" >>` 같은 unquoted expansion 금지.
 5. **Per-call context guard 180K chars** — prompt 파일이 180,000자를 넘으면 호출 중단, 파일 분할 또는 요약 필요.
-6. **Timeout 180s** — `timeout 180 codex exec ...`로 hang 방지. 실측: 대부분 15~40s, cold start 시 최대 52s 관찰됨 (CLI 0.125.0 + gpt-5.5).
+6. **Timeout 300s, effort high** — `timeout "${TRIAD_CODEX_TIMEOUT:-300}" codex exec -c model_reasoning_effort="${TRIAD_CODEX_EFFORT:-high}" ...`. `~/.codex/config.toml` 의 기본 강도와 무관하게 이 skill 은 high 로 돈다. 환경변수 `TRIAD_CODEX_EFFORT` (low/medium/high/xhigh/max/ultra) 와 `TRIAD_CODEX_TIMEOUT` (초) 로 호출마다 바꾼다. 실측(CLI 0.159.3 + gpt-6-astra, 24KB 프롬프트): high 44s, xhigh 113s, max 227s. max 이상을 쓰려면 `TRIAD_CODEX_TIMEOUT=480` 이상을 같이 준다.
 
 ### 호출 템플릿
 
@@ -196,8 +196,8 @@ if [ "$BYTES" -gt 180000 ]; then
 fi
 
 # 3. Codex 호출 (stdin)
-CODEX="${CODEX:-codex exec --dangerously-bypass-approvals-and-sandbox}"
-timeout 120 $CODEX --skip-git-repo-check --output-last-message "$CODEX_OUT" < "$PROMPT_FILE" > "$CODEX_OUT.log" 2>&1 || {
+CODEX="${CODEX:-codex exec -c model_reasoning_effort="${TRIAD_CODEX_EFFORT:-high}" --dangerously-bypass-approvals-and-sandbox}"
+timeout "${TRIAD_CODEX_TIMEOUT:-300}" $CODEX --skip-git-repo-check --output-last-message "$CODEX_OUT" < "$PROMPT_FILE" > "$CODEX_OUT.log" 2>&1 || {
   echo "[triad-codex] WARN Codex call failed for ${LENS} — fallback" >&2
   echo "[fallback: codex-unavailable]" > "$CODEX_OUT"
 }

@@ -20,6 +20,7 @@ description: 3-perspective deliberation on one markdown/document file - LLM clar
 | 코드 파일 결함 리뷰 (one-shot, 증거 기반) | `/prism` | 5 defect 렌즈 병렬 + Evidence pass |
 | 코드 파일, 크로스모델 신뢰 필요 | `/prism-all` | Claude 5 + Codex 5 |
 | 코드 파일을 실제로 수정해야 함 | `/mangchi` | Claude↔Codex 적대적 반복 편집 |
+| 설계 문서가 **맞는지** (기존 코드와 충돌, 문서의 코드 주장 검증, 실패 모드) | `/prism <doc>` | design 렌즈셋 (prism ≥0.3.1). triad는 문서가 **잘 쓰였는지**를 본다. `/ddaro:review`는 둘 다 돌린다 |
 
 **Cost envelope** (typical):
 - 2 라운드에 수렴 → 6 agent calls, ~60-90초, Claude 토큰만 (Codex 안 씀).

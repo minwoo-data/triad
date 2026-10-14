@@ -146,7 +146,7 @@ Codex 호출 로직은 이 skill이 자체 보유한다 (외부 공용 파일 �
 3. **Heredoc quoted** — `<<'EOF'`로 shell expansion 차단.
 4. **Dynamic content는 파일 append** — `cat <source_file> >> "$PROMPT_FILE"`. `echo "$VAR" >>` 같은 unquoted expansion 금지.
 5. **Per-call context guard 180K chars** — 넘으면 중단, 분할 필요.
-6. **Timeout 180s** — `timeout 180 codex exec ...`. 실측 15~40s, cold start 시 최대 52s.
+6. **Timeout 300s, effort high** — `timeout "${TRIAD_CODEX_TIMEOUT:-300}" codex exec -c model_reasoning_effort="${TRIAD_CODEX_EFFORT:-high}" ...`. `~/.codex/config.toml` 의 기본 강도와 무관하게 이 skill 은 high 로 돈다. 환경변수 `TRIAD_CODEX_EFFORT` (low/medium/high/xhigh/max/ultra) 와 `TRIAD_CODEX_TIMEOUT` (초) 로 호출마다 바꾼다. 실측(CLI 0.159.3 + gpt-6-astra, 24KB 프롬프트): high 44s, xhigh 113s, max 227s. max 이상을 쓰려면 `TRIAD_CODEX_TIMEOUT=480` 이상을 같이 준다.
 
 ### 호출 템플릿
 
@@ -203,7 +203,7 @@ if [ "$BYTES" -gt 180000 ]; then
 fi
 
 # 3. Codex 호출 (stdin)
-timeout 180 codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check --output-last-message "$CODEX_OUT" < "$PROMPT_FILE" > "$CODEX_OUT.log" 2>&1 || {
+timeout "${TRIAD_CODEX_TIMEOUT:-300}" codex exec -c model_reasoning_effort="${TRIAD_CODEX_EFFORT:-high}" --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check --output-last-message "$CODEX_OUT" < "$PROMPT_FILE" > "$CODEX_OUT.log" 2>&1 || {
   echo "[triad-all] WARN Codex call failed for ${LENS}" >&2
   echo "[fallback: codex-unavailable]" > "$CODEX_OUT"
 }
@@ -289,6 +289,6 @@ node verify-independence.js --strict  # + Codex CLI ≥ 0.125.0 체크
 | `/triad` | Claude 3 | Claude 토큰 여유 충분, 빠른 1-엔진 리뷰 |
 | `/triad-codex` | Codex 3 | Claude 토큰 아끼고 싶거나 다른 모델 관점 원할 때 |
 | `/triad-all` (이 skill) | Claude 3 + Codex 3 | 중요한 문서, 최고 신뢰, 양쪽 토큰 OK |
-| `/prism-all` | Claude 5 + Codex 5 | **코드** 파일 (triad 계열은 문서 전용) |
+| `/prism-all` | Claude 5 + Codex 5 | **코드** 파일, 또는 설계 문서의 **건전성** (design 렌즈셋). triad 계열은 문서의 글 품질 |
 
 세 skill은 완전히 독립된 plugin으로 각자 자기 프롬프트·템플릿·Codex 규약을 보유한다. 하나만 설치해도 나머지 없이 동작.
