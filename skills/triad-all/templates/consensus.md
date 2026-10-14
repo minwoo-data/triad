@@ -63,5 +63,4 @@
 
 ## 7. Downstream hooks
 
-- 코드 입력 → `RECOMMENDATIONS.md` 참조
 - md 입력 → `updated.md` 최신본 (`--apply` 사용 시)

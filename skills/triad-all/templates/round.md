@@ -106,7 +106,7 @@ Engines gave contradictory advice in the same lens. Main surfaces both sides + p
 + ...
 ```
 
-(코드 입력 또는 --apply 미사용 시 생략 또는 "N/A — read-only".)
+(--apply 미사용 시 생략 또는 "N/A — read-only".)
 
 ---
 

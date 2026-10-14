@@ -58,6 +58,5 @@
 
 이 consensus 문서를 어떻게 활용할 수 있는가:
 
-- **코드 입력**이었다면: `RECOMMENDATIONS.md` 참조 → pumasi 또는 직접 구현에 입력
 - **md 입력**이었다면: `updated.md`가 최신본 (`--apply` 사용 시). 원본 경로로 이동할지는 사용자 결정.
 - GSD phase 내부라면: PLAN.md 또는 해당 phase 산출물에 이 결정 링크.

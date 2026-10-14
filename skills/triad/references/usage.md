@@ -24,19 +24,17 @@
 - 원본 `docs/design/architecture.md`에도 Edit으로 반영
 - 각 round-N.md의 "Applied Changes" 섹션에 diff 기록
 
-## 예시 3: 코드 파일 리뷰 (항상 read-only)
+## 예시 3: 코드 파일은 거부된다 (0.2.0+)
 
 ```
 /triad src/api/handlers.py
-/triad src/api/handlers.py --apply    # --apply 무시됨, 경고 후 진행
 ```
 
 결과:
-- `docs/discussion/code/handlers-py/source-snapshot.md` - 코드를 md로 스냅샷
-- `docs/discussion/code/handlers-py/round-N.md` - 3 관점 리뷰
-- `docs/discussion/code/handlers-py/CONSENSUS.md` - 합의
-- `docs/discussion/code/handlers-py/RECOMMENDATIONS.md` - **pumasi tasks 호환 포맷의 구현 권고**
-- 원본 `.py`는 **절대 수정 안 함**
+- 라운드 시작 안 함. 한 줄 출력 후 종료:
+  `triad는 문서 전용입니다. 코드 리뷰는 /prism <file>, 반복 수정은 /mangchi <file> 을 쓰세요.`
+- 코드 리뷰: `/prism src/api/handlers.py` (증거 기반 5 렌즈)
+- 코드 수정: `/mangchi src/api/handlers.py` (Claude 편집 + Codex 적대 리뷰)
 
 ## 예시 4: 이어하기
 
@@ -62,10 +60,10 @@ state.json을 closed로 마크, CONSENSUS.md를 그 시점까지의 내용으로
 - 용어/네이밍이 장기에 영향 (DB 컬럼명, API path, 이벤트 이름)
 - LLM이 자주 읽는 문서 (`.claude/CLAUDE.md`, rules/*.md) - LLM 관점 특히 가치
 - 낡아 보이는 `docs/`의 문서들
-- 리팩토링 전 코드 파일 (권고안 뽑아서 pumasi로 재구현)
 
 ## 언제 쓰지 말 것 (Skip)
 
+- **코드 파일** - `/prism`(리뷰) 또는 `/mangchi`(수정). triad는 거부한다.
 - 표준 기능 구현 ("Todo 앱 만들기") - 바로 pumasi
 - 버그 수정, 소규모 개선 - Claude 직접
 - 이미 ADR/PRD가 명확한 경우
@@ -88,4 +86,4 @@ state.json을 closed로 마크, CONSENSUS.md를 그 시점까지의 내용으로
 
 프로젝트에 "review/refactor/analysis 작업은 5 parallel agents" 규칙이 있지만, **triad는 예외**다.
 이유: 3 관점(LLM/Architect/EndUser)의 고정 비대칭성이 triad의 identity. 관점 수가 늘면 렌즈가 희석된다.
-무차별 리뷰가 필요하면 `/review-all`(4-agent) 또는 `/gsd-review`를 사용.
+코드 결함 리뷰가 필요하면 `/prism`(5 defect 렌즈 + Evidence pass) 또는 `/gsd-review`를 사용.

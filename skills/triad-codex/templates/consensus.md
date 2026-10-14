@@ -50,5 +50,4 @@
 
 ## 6. Downstream Hooks
 
-- **코드 입력**이었다면: 이 CONSENSUS.md → 직접 구현 입력
 - **md 입력**이었다면: `updated.md`가 최신본 (`--apply` 사용 시)

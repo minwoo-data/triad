@@ -2,7 +2,7 @@
 
 > Language: [English](README.md) · **한국어**
 
-**하나의 파일을 고정된 3 관점으로, 세 관점이 모두 합의할 때까지 돌린다.**
+**하나의 문서를 고정된 3 관점으로, 세 관점이 모두 합의할 때까지 돌린다.**
 
 문서는 "괜찮아 보인다" 승인으로 나가고 3주 뒤에 비로소 문제가 터진다 — AI 에이전트가 파싱 못 하거나, 아키텍처가 빨리 낡거나, 새 인력이 5분 안에 파악을 포기한다. triad는 단일 파일을 3 독립 렌즈로 병렬 리뷰하고 세 관점이 전부 PASS 할 때까지 숙의한다.
 
@@ -10,10 +10,10 @@
 /triad <file>                  -> 읽기 전용 합의 (CONSENSUS.md)
 /triad <file> --apply          -> md: updated.md 생성 (원본 불변)
 /triad <file> --apply=original -> md: 원본도 Edit
-/triad <code.py>               -> 코드: 항상 read-only, RECOMMENDATIONS.md
+/triad <code.py>               -> 거부: 문서 전용 (코드는 /prism 또는 /mangchi)
 ```
 
-3 서브에이전트, 3 편향 (LLM 명확성 / 아키텍처 수명 / 엔드유저 이해도), 1 오케스트레이터. 라운드 N은 N-1의 미해결 쟁점만 이어받는다. Hard cap 라운드 5. **코드는 어떤 플래그로도 수정되지 않는다.**
+3 서브에이전트, 3 편향 (LLM 명확성 / 아키텍처 수명 / 엔드유저 이해도), 1 오케스트레이터. 라운드 N은 N-1의 미해결 쟁점만 이어받는다. Hard cap 라운드 5. **0.2.0부터 문서 전용** — 코드 파일은 `/prism`(리뷰) 또는 `/mangchi`(반복 수정)로 안내한다.
 
 ---
 
@@ -32,13 +32,12 @@
 - **프로젝트 지시 문서** (`CLAUDE.md`, 에이전트 프롬프트, 온보딩 문서) — AI도 읽기 때문에 LLM 렌즈가 특히 가치
 - **ADR** (Architecture Decision Record) — commit 전에 3각도에서 선택을 검증
 - **공개 문서** (README, getting-started, API) — endUser 렌즈가 "처음 읽는 사람이 조용히 포기하는 지점"을 잡아냄
-- **코드 파일을 철저히 read-only 리뷰** — triad는 코드 수정 안 함, `RECOMMENDATIONS.md`만 산출
 - **PR 올리기 전** — 변경 근거에 대한 3자 독립 검토
 
 ## 자매 도구 (같은 마켓플레이스)
 
 - **[ddaro](https://github.com/minwoo-data/ddaro)** — worktree 기반 병렬 Claude Code 세션 + 안전한 merge.
-- **[prism](https://github.com/minwoo-data/prism)** — 5-각도 병렬 코드 리뷰 + singleton 검증 (더 넓게, 1회성).
+- **[prism](https://github.com/minwoo-data/prism)** — 증거 기반 5-렌즈 코드 리뷰 (1회성). **코드는 이걸로**; triad는 문서용.
 - **[mangchi](https://github.com/minwoo-data/mangchi)** — Claude + Codex cross-review로 파일 반복 다듬기.
 
 ---
@@ -64,7 +63,7 @@
 ```
 /triad docs/features/billing.md          # 3 렌즈 검토, read-only
 /triad docs/features/billing.md --apply  # updated.md 추가 생성
-/triad src/routes/auth.py                # 코드 모드, 읽기 전용
+/prism src/routes/auth.py                # 코드는 triad가 아니라 prism (수정은 /mangchi)
 ```
 
 설치/업데이트 후 Claude Code **재시작**.
@@ -116,7 +115,7 @@
 ## Features
 
 - **Round-delta** — 라운드 N은 N-1의 미해결 쟁점만 본다. 해결된 항목은 재논의 금지. 합의 파일이 부풀지 않음.
-- **입력 인지 수정 권한** — 마크다운은 `--apply`/`--apply=original`로 수정 가능. 코드 파일은 플래그 무관 항상 read-only. Hard invariant.
+- **명시적 수정 권한** — 원본은 `--apply=original`일 때만 수정, `--apply`는 옆에 `updated.md`만 생성. 코드 파일은 받지 않음 (0.2.0+).
 - **Fork 격리** — 서브에이전트끼리 서로의 답을 못 봄 → agreement가 echo가 아닌 독립 signal.
 - **명시적 Fallback 태그** — 서브에이전트가 크래시 시 메인이 local pass 수행 + 라운드에 `[fallback: main-local-pass]` 태그. 품질 저하가 조용히 숨지 않음.
 - **자연 종결** — 3 PASS **AND** open_questions 빈 배열. 하나라도 어긋나면 다음 라운드. Hard cap 라운드 5.
@@ -127,10 +126,10 @@
 
 | 입력 | 기본 | `--apply` | `--apply=original` |
 |---|---|---|---|
-| `.md` | 원본 불변 | `updated.md` 생성, 원본 여전히 불변 | `updated.md` + 원본 Edit |
-| `.py`/`.js`/코드 | 원본 불변, `RECOMMENDATIONS.md` 산출 | `--apply` 무시 (경고) | `--apply=original` 무시 (경고) |
+| `.md` / `.mdx` / `.txt` / `.rst` (문서) | 원본 불변 | `updated.md` 생성, 원본 여전히 불변 | `updated.md` + 원본 Edit |
+| `.py`/`.js`/`.ts`/코드 | **거부** | 거부 | 거부 |
 
-**코드 파일은 어떤 플래그로도 수정되지 않음.** 코드 변경이 필요하면 다른 도구를 쓰세요 (예: `/mangchi`).
+**코드 파일은 받지 않는다 (0.2.0+).** triad는 `/prism <file>`(증거 기반 리뷰) 또는 `/mangchi <file>`(반복 수정)로 안내하는 한 줄만 출력하고 종료한다. 이유: 코드 대상에서 Architect 렌즈는 mangchi의 `design` 축, prism의 Testability 렌즈와 같은 질문을 하므로 중복 도구였다. 입력 유형별 경로 하나: 문서 → triad, 코드 → prism/mangchi.
 
 ## 종결 조건
 
@@ -153,7 +152,7 @@ docs/discussion/<slug>/
 └── updated.md             # --apply 사용 시에만 (md 입력)
 ```
 
-코드 입력 시 경로는 `docs/discussion/code/<slug>/`이며 최종 파일은 `RECOMMENDATIONS.md` (downstream 코드 생성 도구와 호환 포맷). `/triad-codex`와 `/triad-all`은 각각 `docs/discussion/codex/<slug>/`, `docs/discussion/all/<slug>/`에 기록.
+`/triad-codex`와 `/triad-all`은 각각 `docs/discussion/codex-md/<slug>/`, `docs/discussion/all-md/<slug>/`에 기록. (0.1.x의 `docs/discussion/code/<slug>/` 트리와 `RECOMMENDATIONS.md`는 코드 입력 지원과 함께 제거.)
 
 ---
 
@@ -179,12 +178,11 @@ cat docs/discussion/billing/updated.md
 # → 반영본. 만족스러우면 수동으로 docs/features/billing.md로 이동
 ```
 
-### 코드 리뷰 모드 (항상 read-only)
+### 코드 파일? 여기선 안 받음
 
 ```
 /triad src/routes/auth.py
-# → docs/discussion/code/auth-py/round-1.md ... RECOMMENDATIONS.md
-# → 원본 파일은 안 건드림. 권장사항 반영은 다른 도구로.
+# → "triad는 문서 전용입니다. 코드 리뷰는 /prism <file>, 반복 수정은 /mangchi <file> 을 쓰세요."
 ```
 
 ### Cross-model 모드
@@ -254,7 +252,7 @@ codex --version   # >= 0.125.0 이어야 함
 
 ## 철학
 
-서로의 응답을 볼 수 없는 세 리뷰어가 고정 질문으로 한 파일을 합의 또는 cap까지 숙의한다. Round-delta 원칙으로 문서가 짧게 유지됨 — 한 번 합의된 건 그대로 남는다. 마크다운은 움직일 수 있지만 코드는 절대 움직이지 않는다. 코드를 바꾸려면 다른 도구를 써라.
+서로의 응답을 볼 수 없는 세 리뷰어가 고정 질문으로 한 파일을 합의 또는 cap까지 숙의한다. Round-delta 원칙으로 문서가 짧게 유지됨 — 한 번 합의된 건 그대로 남는다. 문서 전용이다. 코드는 `/prism`(리뷰)이나 `/mangchi`(수정)로.
 
 ## 업데이트 기록
 

@@ -326,9 +326,11 @@ perspective independence held and that severity caps were respected.
 - **Escalate open questions; don't invent answers.** Triad's strength
   is that subagents flag unknowns instead of guessing. Respect that
   - go find the actual answer before round 2.
-- **Code-mode produces `RECOMMENDATIONS.md`, not patches.** If you
-  want code to change, a separate code-modification tool handles the
-  implementation. Triad stops at "here's what should change and why."
+- **(Historical, ≤0.1.x) Code-mode produced `RECOMMENDATIONS.md`, not
+  patches.** Since 0.2.0 triad refuses code inputs entirely; the code
+  path is `/prism` (review) → `/mangchi` (fix). The case studies above
+  that used code-mode remain valid as evidence but are not reproducible
+  with the current version.
 
 ---
 

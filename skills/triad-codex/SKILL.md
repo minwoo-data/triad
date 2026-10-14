@@ -1,6 +1,6 @@
 ---
 name: triad-codex
-description: Codex-backed 3-perspective deliberation. Like triad but the 3 lenses (LLM clarity / architecture longevity / end-user comprehension) are evaluated by Codex CLI (GPT-5.5 generation) instead of Claude subagents. Use when you want a different-model opinion, or when Claude tokens are scarce. Triggers on "/triad-codex <file>", "triad codex로 검토", "codex로 3관점".
+description: Codex-backed 3-perspective deliberation on one markdown/document file. Like triad but the 3 lenses (LLM clarity / architecture longevity / end-user comprehension) are evaluated by Codex CLI (GPT-5.5 generation) instead of Claude subagents. Documents only (code → /prism-codex). Use when you want a different-model opinion, or when Claude tokens are scarce. Triggers on "/triad-codex <file>", "triad codex로 검토", "codex로 3관점".
 argument-hint: "<file> [--apply] [--apply=original] [--continue <slug>] [--stop <slug>]"
 user-invocable: true
 ---
@@ -8,7 +8,7 @@ user-invocable: true
 # triad-codex — Codex-backed 3-Perspective Deliberation
 
 > 메인은 Claude (오케스트레이터), 3 관점 판단은 **Codex CLI**. 목적: Claude self-bias 회피 + Claude 토큰 절약.
-> 코드는 절대 수정하지 않는다. md는 `--apply`로 `updated.md`를 생성하고, 원본 교체는 `--apply=original`일 때만.
+> **문서 전용** - 코드 파일은 거부한다 (코드는 `/prism-codex`). md는 `--apply`로 `updated.md`를 생성하고, 원본 교체는 `--apply=original`일 때만.
 
 ## 핵심 가치
 
@@ -53,12 +53,16 @@ codex --version      # codex-cli 0.125.0 이상이어야 함
 
 | 입력 | read-only 기본 | `--apply` | `--apply=original` |
 |---|---|---|---|
-| `.md` | 원본 불변 | updated.md 생성/갱신 | updated.md + 원본 Edit |
-| `.py`/`.js`/기타 코드 | 원본 불변 | **무시 (경고)** | **무시 (경고)** |
+| `.md` / `.mdx` / `.txt` / `.rst` 등 문서 | 원본 불변 | updated.md 생성/갱신 | updated.md + 원본 Edit |
+| `.py`/`.js`/`.ts`/기타 코드 | **거부** | 거부 | 거부 |
 
-**불변식**: 코드 파일은 어떤 플래그와도 수정되지 않는다.
+**코드 입력 거부 (v0.2.0+)**: 코드 확장자면 라운드를 시작하지 않고 한 줄로 거부 후 종료:
 
-슬러그 규칙: 확장자 제거 + 공백/특수문자 `-`로. 예: `src/routes/auth.py` → slug=`auth-py`.
+```
+triad-codex는 문서 전용입니다. 코드 리뷰는 /prism-codex <file>, 반복 수정은 /mangchi <file> 을 쓰세요.
+```
+
+슬러그 규칙: 확장자 제거 + 공백/특수문자 `-`로. 예: `docs/design/architecture.md` → slug=`architecture`.
 
 ---
 
@@ -69,9 +73,9 @@ codex --version      # codex-cli 0.125.0 이상이어야 함
 2. 모델 선택:
    - `~/.codex/config.toml`의 `model` 값 읽기 (기본 `gpt-5.5`).
    - 해당 모델이 호출 실패하면 `~/.codex/models_cache.json`의 `"visibility": "list"` 첫 slug로 폴백. state.json에 `[model-fallback: <picked>]` 기록.
-3. 입력 파일 존재 확인.
-4. 슬러그 계산, 출력 디렉토리 생성: `docs/discussion/codex/<slug>/` (코드) 또는 `docs/discussion/codex-md/<slug>/` (md).
-5. `source.md` 또는 `source-snapshot.md`로 원본 스냅샷 저장.
+3. 입력 파일 존재 확인 + **문서 파일인지 확인** (코드면 거부 후 종료).
+4. 슬러그 계산, 출력 디렉토리 생성: `docs/discussion/codex-md/<slug>/`.
+5. `source.md`로 원본 스냅샷 저장.
 6. `state.json` 생성: `{round: 1, status: "open", engine: "codex", codex_version, codex_model, started_at, target_file}`.
 
 ### Phase 1: 3 Codex 호출 (메인)
@@ -96,12 +100,11 @@ codex --version      # codex-cli 0.125.0 이상이어야 함
 6. 다음 라운드로 이월할 open issues
 
 ### Phase 3: 반영 판단 (메인)
-| 입력 유형 | 플래그 | 동작 |
-|---|---|---|
-| 코드 | (모든 플래그) | 원본 불변. `RECOMMENDATIONS.md`에 권고만 누적. |
-| md | 플래그 없음 | 원본 불변. updated.md 생성 안 함. |
-| md | `--apply` | 원본 불변. updated.md 생성/갱신. |
-| md | `--apply=original` | 위 + 원본 md Edit 반영. diff를 `round-N.md`에 기록. |
+| 플래그 | 동작 |
+|---|---|
+| 플래그 없음 | 원본 불변. updated.md 생성 안 함. |
+| `--apply` | 원본 불변. updated.md 생성/갱신. |
+| `--apply=original` | 위 + 원본 md Edit 반영. diff를 `round-N.md`에 기록. |
 
 ### Phase 4: 종결 판정 (메인)
 **종결 조건 AND**:
@@ -141,22 +144,17 @@ codex --version      # codex-cli 0.125.0 이상이어야 함
 ### 호출 템플릿
 
 ```bash
-DIR="docs/discussion/codex/<slug>"
+DIR="docs/discussion/codex-md/<slug>"
 N="<round_number>"
 LENS="<llm|architect|enduser>"
 PROMPT_FILE="$DIR/round-${N}.${LENS}.prompt.txt"
 CODEX_OUT="$DIR/round-${N}.${LENS}.codex.txt"
 
-# 1. prompt 조립 (quoted heredoc)
+# 1. prompt 조립 (quoted heredoc). 순서: 대상 문서 → 지난 합의 → 관점 정의 → 출력 포맷.
+#    3 렌즈 공통인 앞부분(문서+합의)이 동일 prefix가 되어 프롬프트 캐시에 걸린다.
+#    관점을 앞에 두면 첫 토큰부터 달라져 캐시가 적중하지 않는다.
 cat > "$PROMPT_FILE" <<'EOF'
-[이 파일 내용을 읽고 <관점>으로만 평가하라]
-
-## 너의 관점 정의
-EOF
-
-cat "agents/${LENS}-perspective.md" >> "$PROMPT_FILE"
-
-cat >> "$PROMPT_FILE" <<'EOF'
+[아래 대상 파일을 읽고, 마지막에 주어지는 관점으로만 평가하라]
 
 ## 대상 파일
 EOF
@@ -171,6 +169,13 @@ if [ "$N" -ge 2 ]; then
 EOF
   cat "$DIR/round-$((N-1)).carryover.txt" >> "$PROMPT_FILE"
 fi
+
+cat >> "$PROMPT_FILE" <<'EOF'
+
+## 너의 관점 정의
+EOF
+
+cat "agents/${LENS}-perspective.md" >> "$PROMPT_FILE"
 
 cat >> "$PROMPT_FILE" <<'EOF'
 
@@ -247,30 +252,23 @@ Codex 호출 실패 시 (timeout, exit != 0, 빈 응답, YAML 추출 실패):
 
 ```
 docs/discussion/
-├── codex-md/<slug>/                    # md 입력
-│   ├── source.md
-│   ├── state.json
-│   ├── round-1.md
-│   ├── round-1.llm.prompt.txt
-│   ├── round-1.llm.codex.txt
-│   ├── round-1.architect.prompt.txt
-│   ├── round-1.architect.codex.txt
-│   ├── round-1.enduser.prompt.txt
-│   ├── round-1.enduser.codex.txt
-│   ├── round-1.carryover.txt
-│   ├── ...
-│   ├── CONSENSUS.md
-│   └── updated.md
-│
-└── codex/<slug>/                       # 코드 입력
-    ├── source-snapshot.md
+└── codex-md/<slug>/
+    ├── source.md
     ├── state.json
-    ├── round-N.md
-    ├── round-N.<lens>.prompt.txt
-    ├── round-N.<lens>.codex.txt
+    ├── round-1.md
+    ├── round-1.llm.prompt.txt
+    ├── round-1.llm.codex.txt
+    ├── round-1.architect.prompt.txt
+    ├── round-1.architect.codex.txt
+    ├── round-1.enduser.prompt.txt
+    ├── round-1.enduser.codex.txt
+    ├── round-1.carryover.txt
+    ├── ...
     ├── CONSENSUS.md
-    └── RECOMMENDATIONS.md
+    └── updated.md
 ```
+
+(v0.1.x의 `docs/discussion/codex/<slug>/` 코드 트리와 `RECOMMENDATIONS.md`는 코드 입력 폐기와 함께 제거됨.)
 
 ## 자립성 검증
 
@@ -293,7 +291,8 @@ node verify-independence.js --strict
 - ❌ Codex 실패 시 조용히 Claude로 대체 — `[fallback]` 태그 필수.
 - ❌ 3 관점을 서로 다른 프롬프트 구조로 호출 — 모두 `agents/<lens>-perspective.md` 기반.
 - ❌ argv로 프롬프트 전달 — 항상 tempfile + stdin.
-- ❌ 코드 파일을 `--apply`로 수정 — 거부.
+- ❌ 코드 파일을 입력으로 받아 라운드 진행 — 거부 후 `/prism-codex`, `/mangchi` 안내.
+- ❌ 관점 정의를 프롬프트 맨 앞에 — 공통 prefix(대상 문서) 먼저.
 - ❌ 이미 합의된 쟁점을 다음 라운드에 재수록 — Round-Delta 위반.
 - ❌ 5 라운드 초과 진입 — hard cap.
 - ❌ 다른 plugin/skill 파일을 참조 — 전역 hook과 `verify-independence.js`가 차단.
