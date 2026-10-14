@@ -39,7 +39,10 @@ const MAX = 200;
 const NL = new RegExp('\\r\\n|\\n|\\r|\\u2028|\\u2029');
 const ZW = new RegExp('[\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\uFEFF\\u00AD]', 'g');
 const LIST_PREFIX = /^(?:[-*>•]\s+|\d+[.)]\s+)?/;
-const VERDICT_RE = /^VERDICT\s*\|\s*(PASS|REVISE|BLOCK)\b/i;
+// One token, end of line: the contract's own grammar line 'VERDICT | PASS|REVISE|BLOCK' must not count.
+const VERDICT_RE = /^VERDICT\s*\|\s*(PASS|REVISE|BLOCK)\s*$/i;
+// Placeholders from the contract template, echoed back by a model, are not findings.
+const PLACEHOLDER_RE = /^<[^>]*>$/;
 const ISSUE_RE = /^ISSUE\s*\|\s*([A-Za-z]+)\s*\|\s*([^|]+?)\s*\|\s*(\S.*)$/i;
 const QUESTION_RE = /^QUESTION\s*\|\s*(\S.*)$/i;
 const SEV_MAP = {
@@ -63,12 +66,14 @@ function parseBody(bodyLines) {
     } else if ((m = s.match(ISSUE_RE))) {
       const sev = SEV_MAP[m[1].toUpperCase()];
       const locus = m[2].trim(), text = m[3].trim();
-      if (!sev || !locus || !text) { skipped++; continue; }
+      if (!sev || !locus || !text || PLACEHOLDER_RE.test(locus) || /<(problem|fix|locus)>/.test(text)) { skipped++; continue; }
       if (issues.length >= MAX) { overflow++; continue; }
       issues.push({ severity: sev, locus, text });
     } else if ((m = s.match(QUESTION_RE))) {
       if (questions.length >= MAX) { overflow++; continue; }
-      questions.push(m[1].trim());
+      const q = m[1].trim();
+      if (PLACEHOLDER_RE.test(q)) { skipped++; continue; }
+      questions.push(q);
     } else {
       skipped++;
     }

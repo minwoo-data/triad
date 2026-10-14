@@ -111,7 +111,7 @@ lens당 `Bash` 1개로 `codex-run.sh lens`를 실행한다 (아래 §Codex 호�
 **종결 시**: `CONSENSUS.md` 작성.
 
 ### Phase 5: 다음 라운드 or 종료
-- 미충족 → round N+1. `state.json` 업데이트. 남은 쟁점만 다음 라운드 입력.
+- 미충족 → round N+1. `state.json` 업데이트. 남은 쟁점만 다음 라운드 입력. `round-N.carryover.txt`를 쓴다: `## 합의됨`(ACCEPT·반영 완료·REJECT — 다음 라운드에서 재논의 금지) / `## 미해소`(DEFER·새 open_questions — 다시 확인). 이 파일이 없으면 N+1 라운드 호출이 exit 2로 멈춘다.
 - 충족 → `state.json` status="closed".
 
 ## Round-Delta 원칙 (MUST)
@@ -122,22 +122,22 @@ lens당 `Bash` 1개로 `codex-run.sh lens`를 실행한다 (아래 §Codex 호�
 
 ## Codex 호출 (엄수: `codex-run.sh`로만)
 
-Codex 호출 계약은 이 skill 디렉토리의 `codex-run.sh`가 코드로 강제한다 (외부 공용 파일 없음 - plugin 독립성). 호출 템플릿을 손으로 쓰거나 `codex exec`를 직접 부르지 않는다. lens당 Bash 1개, Bash tool `timeout`은 330000 이상:
+Codex 호출 계약은 이 skill 디렉토리의 `codex-run.sh`가 코드로 강제한다 (외부 공용 파일 없음 - plugin 독립성). 호출 템플릿을 손으로 쓰거나 `codex exec`를 직접 부르지 않는다. lens당 Bash 1개, Bash tool `timeout` = (`TRIAD_CODEX_TIMEOUT`(기본 300) + 30) × 1000 ms, 최대 600000:
 
 ```bash
-bash "<skill dir>/codex-run.sh" lens <discussion-dir> <N> <llm|architect|enduser> --target <원본 문서> [--context <배경 파일>]
+bash "<skill dir>/codex-run.sh" lens <discussion-dir> <N> <llm|architect|enduser> --target <원본 문서> [--context <파일>]... [--instructions <파일>] [--no-carryover]
 ```
 
 스크립트가 강제하는 것:
-- **프롬프트 조립**: Sandbox Safety Preamble → 대상 문서 → (`--context`) → (N≥2면 `round-<N-1>.carryover.txt`를 자동으로) → `agents/<lens>-perspective.md` → 출력 포맷 v1(`<<<TRIAD-FINDINGS v1>>>`). 앞부분이 3 렌즈 공통이라 프롬프트 캐시에 걸린다. N≥2인데 carryover가 없으면 경고한다(Round-Delta).
+- **프롬프트 구조 (두 엔진 공통, 스크립트가 조립)**: 대상 문서 → 배경(`--context`, 여러 개 가능) → 추가 지시(`--instructions`, 예: "모든 file:line 주장을 코드와 대조") → 지난 라운드 carryover(N≥2면 `round-<N-1>.carryover.txt` **필수**, 없으면 exit 2, 의도적으로 건너뛸 때만 `--no-carryover`) → `agents/<lens>-perspective.md` → 출력 계약 `templates/output-contract.md`(**단일 소스**, `<<<TRIAD-FINDINGS v1>>>`). Codex에는 맨 앞에 Sandbox Safety Preamble이 붙는다. 앞부분이 3 렌즈 공통이라 프롬프트 캐시에 걸린다. 출력 계약 파일·관점 파일의 형식·두 엔진의 동일 입력은 selftest가 검사한다 — 구조가 빠지면 `verify-independence.js --strict`가 실패한다.
 - 파일 + stdin 전달, 180K 가드, timeout 300s·effort high(`TRIAD_CODEX_TIMEOUT`·`TRIAD_CODEX_EFFORT`로 변경), **read-only 샌드박스**(Codex가 실행하는 명령은 읽기만, 쓰기·네트워크 차단).
 - **secret scrub**: Codex 출력 전체를 검사해, 프롬프트에 없던 secret 모양 문자열이 나오면 출력을 지우고 `[fallback: codex-output-contained-secret-pattern]`.
 - `--output-last-message`의 최종 답만 쓴다. raw 스트림은 프롬프트를 되울리므로 파싱하지도 저장하지도 않는다. 결과는 `parse-triad.js`로 파싱.
 - 결과 파일: `round-N.<lens>.prompt.txt` / `.codex.txt` / `.codex.txt.json`. stdout = 요약 1줄(`status=… verdict=… issues=N questions=N sandbox=…`) + 파서 JSON.
 
-실패한 lens도 exit 0 + `[fallback: <사유>]` 마커 → 파서가 `verdict=DEGRADED`. 사유: `timeout`, `codex-unavailable`(stderr 끝 300자 포함), `no-last-message`, `prompt-too-large`, `prompt-build-failed`, `interrupted`, `codex-output-contained-secret-pattern`·`prompt-modified-during-run`(이 둘은 보안 사건 - 판정에서 빼고 사용자에게 알린다). exit 2는 인자 오류뿐.
+실패한 lens도 exit 0 + `[fallback: <사유>]` 마커 → 파서가 `verdict=DEGRADED`. 사유: `timeout`, `codex-unavailable`(stderr 끝 300자 포함), `no-last-message`, `prompt-too-large`, `prompt-build-failed`, `interrupted`, `codex-output-contained-secret-pattern`·`prompt-modified-during-run`(이 둘은 보안 사건 - 판정에서 빼고 사용자에게 알린다). exit 2 = 인자·설정·설치 오류, carryover 누락, 또는 같은 렌즈가 아직 실행 중(고친 뒤 다시 실행; 다른 모델로 재시도하지 않는다). exit 130 = 중단(마커와 DEGRADED JSON은 남는다). 보안 사건 마커는 다음 실행 때 `*.incident.*`로 보존된다.
 
-샌드박스가 못 읽는 경로(예: Google Drive `H:`)의 사실 확인 자료는 `--context`로 넘긴다(스크립트가 샌드박스 밖에서 읽어 넣는다). 샌드박스 없이 돌리기는 사용자가 요청할 때만 `TRIAD_CODEX_SANDBOX=bypass`. 실측(CLI 0.159.3 + gpt-6-astra, 24KB 프롬프트): effort high 44s, xhigh 113s, max 227s. max 이상은 `TRIAD_CODEX_TIMEOUT=480` 이상과 함께.
+샌드박스가 못 읽는 경로(예: Google Drive `H:`)의 사실 확인 자료는 `--context`로, 호출자가 덧붙일 지시(예: `/ddaro:review`의 코드 대조 지시)는 `--instructions`로 넘긴다(스크립트가 샌드박스 밖에서 읽어 넣는다). 샌드박스 없이 돌리기는 사용자가 요청할 때만 `TRIAD_CODEX_SANDBOX=bypass`. 실측(CLI 0.159.3 + gpt-6-astra, 24KB 프롬프트): effort high 44s, xhigh 113s, max 227s. max 이상은 `TRIAD_CODEX_TIMEOUT=480` 이상과 함께.
 
 ### 출력 파서 (`parse-triad.js`, 헤더가 정본)
 
@@ -145,7 +145,7 @@ bash "<skill dir>/codex-run.sh" lens <discussion-dir> <N> <llm|architect|enduser
 
 ### Fallback 정책
 
-Codex 호출 실패 시 (timeout, exit != 0, 빈 응답, YAML 추출 실패):
+Codex 호출 실패 시 (요약 줄 `status=degraded(timeout|codex-unavailable|no-last-message)`; `prompt-too-large`·`prompt-build-failed`는 재시도하지 않고, `secret-scrubbed(...)`는 보안 사건이라 재시도 없이 사용자에게 알린다):
 1. 첫 실패 → Phase 0에서 선정한 폴백 모델로 1회 재시도(`TRIAD_CODEX_MODEL=<slug>`를 붙여 같은 명령 재실행). 성공 시 `state.json`에 `[model-fallback: <picked>]` 기록.
 2. 재시도도 실패 → 해당 라운드의 해당 관점에 `[fallback: codex-unavailable]` 태그.
 3. `state.json`의 `rounds[N].fallbacks` 배열에 관점 이름 추가.

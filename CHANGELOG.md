@@ -36,10 +36,31 @@ re-type a bash template. Ported from prism 0.4.1, which had the same template pr
   - `parse-triad.js` runs on every answer; stdout is one summary line
     (`status=… verdict=… issues=N questions=N sandbox=…`) plus the parser JSON.
   - Failures degrade the lens (`[fallback: <reason>]` → verdict DEGRADED), never the round.
-  - `--selftest`: 35 cases against a fake Codex; each protection mutation-tested.
+  - `--selftest`: 42 cases against a fake Codex.
+- **One prompt structure for both engines.** The output contract lives in one file,
+  `templates/output-contract.md`, appended to every prompt. `codex-run.sh prompt` writes the Claude
+  agent prompt (`round-N.claude.<lens>.prompt.txt`): the Codex prompt minus the preamble, byte for
+  byte. The selftest fails if the contract file or its use goes missing, if a perspective file asks
+  for another format, or if the two prompts differ. (A first draft of 0.3.0 deleted the v1 grammar
+  together with the old bash template, which left the Claude agents without it; a prism-all review
+  caught it.)
+- `--instructions <file>` (e.g. `/ddaro:review`'s verify-against-code instruction) and repeated
+  `--context`.
+- Round-Delta is enforced: from round 2 the round-(N-1) carryover file is required (`## 합의됨` /
+  `## 미해소`), `--no-carryover` skips it explicitly.
+- The shared safety core matches prism 0.4.2: scratch outside the discussion dir, per-lens lock,
+  incident markers kept, no false quarantines on quoted values or placeholder fixes, more secret
+  forms, fail-closed scan, interrupt JSON, Git Bash for `--strict` on Windows, Codex flag probe.
 - `skills/sync-review-parsers.sh` (referenced by the parser header but missing until now) copies
   `parse-triad.js` and `codex-run.sh` from triad-all to triad-codex and checks for drift.
 - `verify-independence.js --strict` now requires and selftests `parse-triad.js` and `codex-run.sh`.
+
+### Changed (breaking behavior)
+- triad-codex's `CODEX` env override (the whole command) is gone: use `TRIAD_CODEX_BIN`,
+  `TRIAD_CODEX_MODEL`, `TRIAD_CODEX_EFFORT`. Codex now runs in the read-only sandbox by default.
+- `agents/*-perspective.md` and `templates/round.md` use the v1 records instead of YAML.
+- `parse-triad.js` ignores the contract's own template lines if a model echoes them
+  (`VERDICT | PASS|REVISE|BLOCK` used to parse as PASS).
 
 ### Changed
 - triad-all runs its 3 Codex lenses as 3 parallel Bash calls next to the Claude agents (was one

@@ -6,20 +6,20 @@
 **Engines**: Claude Agent + Codex CLI (`{codex_model}`)
 **Started**: {timestamp}
 **Claude wall**: ~{claude_wall}s (3 parallel)
-**Codex wall**: ~{codex_wall}s (3 sequential)
+**Codex wall**: ~{codex_wall}s (3 parallel)
 
 ---
 
 ## 1. LLM Perspective
 
 ### Claude
-```yaml
-{claude_llm_yaml}
+```json
+{claude_llm_json}
 ```
 
 ### Codex ({codex_model})
-```yaml
-{codex_llm_yaml}
+```json
+{codex_llm_json}
 ```
 
 ### Agreement / Disagreement
@@ -32,13 +32,13 @@
 ## 2. Architect Perspective
 
 ### Claude
-```yaml
-{claude_arch_yaml}
+```json
+{claude_arch_json}
 ```
 
 ### Codex
-```yaml
-{codex_arch_yaml}
+```json
+{codex_arch_json}
 ```
 
 ### Agreement / Disagreement
@@ -51,13 +51,13 @@
 ## 3. EndUser Perspective
 
 ### Claude
-```yaml
-{claude_end_yaml}
+```json
+{claude_end_json}
 ```
 
 ### Codex
-```yaml
-{codex_end_yaml}
+```json
+{codex_end_json}
 ```
 
 ### Agreement / Disagreement

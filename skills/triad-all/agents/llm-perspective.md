@@ -20,18 +20,12 @@
 - 설계 결합도/유지보수 (Architect 몫)
 - 타이포/문법 오류 (심각한 의미 왜곡 아닌 한)
 
-## 출력 포맷 (엄수)
+## 출력 형식 (엄수)
 
-```yaml
-verdict: PASS | REVISE | BLOCK
-top_issues:
-  - severity: high | med | low
-    locus: "파일명:줄번호"
-    problem: "1-2문장"
-    proposed_fix: "before/after 스니펫 가능하면 포함"
-open_questions:
-  - "메인에게 되물을 것"
-```
+출력은 프롬프트 맨 끝의 "출력 포맷 v1" 계약(`templates/output-contract.md`)을 따른다. 이 관점의 항목은 이렇게 옮긴다:
+- 판정 → `VERDICT | PASS` 또는 `REVISE` 또는 `BLOCK` (한 줄)
+- 이슈 → `ISSUE | high|med|low 중 하나 | 파일명:줄번호 또는 섹션명 | 문제 1-2문장 -> 고칠 내용(가능하면 before/after)`
+- 메인에게 되물을 것 → `QUESTION | 질문`
 
 ## 제약
 - `severity: high` ≤ 3 per round
