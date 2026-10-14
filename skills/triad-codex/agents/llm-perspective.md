@@ -24,16 +24,10 @@
 
 ## 출력 형식 (엄수)
 
-```yaml
-verdict: PASS | REVISE | BLOCK
-top_issues:
-  - severity: high | med | low
-    locus: "파일명:줄번호 또는 섹션명"
-    problem: "LLM 관점에서 무엇이 문제인가 (1-2문장)"
-    proposed_fix: "구체적 수정 제안 (가능하면 before/after 스니펫)"
-open_questions:
-  - "메인 에이전트에게 되물을 것"
-```
+출력은 프롬프트 맨 끝의 "출력 포맷 v1" 계약(`templates/output-contract.md`)을 따른다. 이 관점의 항목은 이렇게 옮긴다:
+- 판정 → `VERDICT | PASS` 또는 `REVISE` 또는 `BLOCK` (한 줄)
+- 이슈 → `ISSUE | high|med|low 중 하나 | 파일명:줄번호 또는 섹션명 | 문제 1-2문장 -> 고칠 내용(가능하면 before/after)`
+- 메인에게 되물을 것 → `QUESTION | 질문`
 
 ## 제약
 

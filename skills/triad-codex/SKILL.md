@@ -80,15 +80,7 @@ triad-codex는 문서 전용입니다. 코드 리뷰는 /prism-codex <file>, 반
 
 ### Phase 1: 3 Codex 호출 (메인)
 
-**중요**: 3개 Codex 호출을 **순차**로 실행한다 (Claude Agent 병렬 스폰과 달리 Codex CLI는 한 번에 1 호출이 자연스럽고 토큰 경합이 적음).
-
-각 호출마다:
-1. 해당 관점 프롬프트 파일 생성 (`round-{N}.<lens>.prompt.txt`)
-2. Codex stdin 호출 (아래 규약 엄수)
-3. 응답을 `round-{N}.<lens>.codex.txt`에 저장
-4. 응답에서 YAML 블록 추출
-
-3 관점: **llm**, **architect**, **enduser** (순서 고정).
+lens당 `Bash` 1개로 `codex-run.sh lens`를 실행한다 (아래 §Codex 호출). 순서는 **llm → architect → enduser** 고정, 한 번에 하나씩(Codex 사용량 경합을 줄인다). 스크립트가 프롬프트 조립·호출·scrub·파싱을 하고 `round-{N}.<lens>.{prompt.txt,codex.txt,codex.txt.json}`에 남긴다.
 
 ### Phase 2: 합성 (메인)
 `round-N.md` 작성. `templates/round.md` 채움. 섹션:
@@ -119,7 +111,7 @@ triad-codex는 문서 전용입니다. 코드 리뷰는 /prism-codex <file>, 반
 **종결 시**: `CONSENSUS.md` 작성.
 
 ### Phase 5: 다음 라운드 or 종료
-- 미충족 → round N+1. `state.json` 업데이트. 남은 쟁점만 다음 라운드 입력.
+- 미충족 → round N+1. `state.json` 업데이트. 남은 쟁점만 다음 라운드 입력. `round-N.carryover.txt`를 쓴다: `## 합의됨`(ACCEPT·반영 완료·REJECT — 다음 라운드에서 재논의 금지) / `## 미해소`(DEFER·새 open_questions — 다시 확인). 이 파일이 없으면 N+1 라운드 호출이 exit 2로 멈춘다.
 - 충족 → `state.json` status="closed".
 
 ## Round-Delta 원칙 (MUST)
@@ -128,111 +120,33 @@ triad-codex는 문서 전용입니다. 코드 리뷰는 /prism-codex <file>, 반
 
 ---
 
-## Codex 호출 규약 (엄수)
+## Codex 호출 (엄수: `codex-run.sh`로만)
 
-이 섹션은 이 skill 자체가 보유해야 하는 핵심 계약. 외부 공용 파일에 두지 않는다 (plugin 독립성).
-
-### 불변 규칙
-
-1. **argv 금지** — 절대 `codex exec "$PROMPT_TEXT"` 쓰지 않음. Shell injection 벡터.
-2. **tempfile + stdin 강제** — `codex exec ... < "$PROMPT_FILE"` 만 허용.
-3. **Heredoc quoted** — prompt body 작성 시 `<<'EOF'` (single-quoted)로 shell expansion 차단.
-4. **Dynamic content는 파일 append** — 대상 소스, 이전 라운드 decisions digest 등 **모든 동적 섹션은 `cat <source_file> >> "$PROMPT_FILE"` 패턴만 허용**. `echo "$VAR" >>` 같은 unquoted expansion 금지.
-5. **Per-call context guard 180K chars** — prompt 파일이 180,000자를 넘으면 호출 중단, 파일 분할 또는 요약 필요.
-6. **Timeout 300s, effort high** — `timeout "${TRIAD_CODEX_TIMEOUT:-300}" codex exec -c model_reasoning_effort="${TRIAD_CODEX_EFFORT:-high}" ...`. `~/.codex/config.toml` 의 기본 강도와 무관하게 이 skill 은 high 로 돈다. 환경변수 `TRIAD_CODEX_EFFORT` (low/medium/high/xhigh/max/ultra) 와 `TRIAD_CODEX_TIMEOUT` (초) 로 호출마다 바꾼다. 실측(CLI 0.159.3 + gpt-6-astra, 24KB 프롬프트): high 44s, xhigh 113s, max 227s. max 이상을 쓰려면 `TRIAD_CODEX_TIMEOUT=480` 이상을 같이 준다.
-
-### 호출 템플릿
+Codex 호출 계약은 이 skill 디렉토리의 `codex-run.sh`가 코드로 강제한다 (외부 공용 파일 없음 - plugin 독립성). 호출 템플릿을 손으로 쓰거나 `codex exec`를 직접 부르지 않는다. lens당 Bash 1개, Bash tool `timeout` = (`TRIAD_CODEX_TIMEOUT`(기본 300) + 30) × 1000 ms, 최대 600000:
 
 ```bash
-DIR="docs/discussion/codex-md/<slug>"
-N="<round_number>"
-LENS="<llm|architect|enduser>"
-PROMPT_FILE="$DIR/round-${N}.${LENS}.prompt.txt"
-CODEX_OUT="$DIR/round-${N}.${LENS}.codex.txt"
-
-# 1. prompt 조립 (quoted heredoc). 순서: 대상 문서 → 지난 합의 → 관점 정의 → 출력 포맷.
-#    3 렌즈 공통인 앞부분(문서+합의)이 동일 prefix가 되어 프롬프트 캐시에 걸린다.
-#    관점을 앞에 두면 첫 토큰부터 달라져 캐시가 적중하지 않는다.
-cat > "$PROMPT_FILE" <<'EOF'
-[아래 대상 파일을 읽고, 마지막에 주어지는 관점으로만 평가하라]
-
-## 대상 파일
-EOF
-
-cat "$TARGET_FILE" >> "$PROMPT_FILE"
-
-# (round >= 2일 때만) 지난 라운드 CONSENSUS 섹션 append
-if [ "$N" -ge 2 ]; then
-  cat >> "$PROMPT_FILE" <<'EOF'
-
-## 지난 라운드 합의 (이미 해소된 쟁점은 재논의 금지)
-EOF
-  cat "$DIR/round-$((N-1)).carryover.txt" >> "$PROMPT_FILE"
-fi
-
-cat >> "$PROMPT_FILE" <<'EOF'
-
-## 너의 관점 정의
-EOF
-
-cat "agents/${LENS}-perspective.md" >> "$PROMPT_FILE"
-
-cat >> "$PROMPT_FILE" <<'EOF'
-
-## 출력 포맷 v1 (엄수, 펜스 블록 하나)
-<<<TRIAD-FINDINGS v1>>>
-VERDICT | PASS|REVISE|BLOCK
-ISSUE | high|med|low | <locus> | <problem> -> <fix>
-QUESTION | <text>
-<<<END>>>
-(VERDICT 한 줄 필수. ISSUE/QUESTION 0개 이상. 블록 밖 자유 추론은 무시됨.)
-EOF
-
-# 2. context guard
-BYTES=$(wc -c < "$PROMPT_FILE")
-if [ "$BYTES" -gt 180000 ]; then
-  echo "[triad-codex] FAIL prompt ${BYTES}B > 180K for ${LENS}" >&2
-  exit 2
-fi
-
-# 3. Codex 호출 (stdin)
-CODEX="${CODEX:-codex exec -c model_reasoning_effort="${TRIAD_CODEX_EFFORT:-high}" --dangerously-bypass-approvals-and-sandbox}"
-timeout "${TRIAD_CODEX_TIMEOUT:-300}" $CODEX --skip-git-repo-check --output-last-message "$CODEX_OUT" < "$PROMPT_FILE" > "$CODEX_OUT.log" 2>&1 || {
-  echo "[triad-codex] WARN Codex call failed for ${LENS} — fallback" >&2
-  echo "[fallback: codex-unavailable]" > "$CODEX_OUT"
-}
+bash "<skill dir>/codex-run.sh" lens <discussion-dir> <N> <llm|architect|enduser> --target <원본 문서> [--context <파일>]... [--instructions <파일>] [--no-carryover]
 ```
 
-### 출력 파서 v1 (A: 구조화 파싱 + degrade)
+스크립트가 강제하는 것:
+- **프롬프트 구조 (두 엔진 공통, 스크립트가 조립)**: 대상 문서 → 배경(`--context`, 여러 개 가능) → 추가 지시(`--instructions`, 예: "모든 file:line 주장을 코드와 대조") → 지난 라운드 carryover(N≥2면 `round-<N-1>.carryover.txt` **필수**, 없으면 exit 2, 의도적으로 건너뛸 때만 `--no-carryover`) → `agents/<lens>-perspective.md` → 출력 계약 `templates/output-contract.md`(**단일 소스**, `<<<TRIAD-FINDINGS v1>>>`). Codex에는 맨 앞에 Sandbox Safety Preamble이 붙는다. 앞부분이 3 렌즈 공통이라 프롬프트 캐시에 걸린다. 출력 계약 파일·관점 파일의 형식·두 엔진의 동일 입력은 selftest가 검사한다 — 구조가 빠지면 `verify-independence.js --strict`가 실패한다.
+- 파일 + stdin 전달, 180K 가드, timeout 300s·effort high(`TRIAD_CODEX_TIMEOUT`·`TRIAD_CODEX_EFFORT`로 변경), **read-only 샌드박스**(Codex가 실행하는 명령은 읽기만, 쓰기·네트워크 차단).
+- **secret scrub**: Codex 출력 전체를 검사해, 프롬프트에 없던 secret 모양 문자열이 나오면 출력을 지우고 `[fallback: codex-output-contained-secret-pattern]`.
+- `--output-last-message`의 최종 답만 쓴다. raw 스트림은 프롬프트를 되울리므로 파싱하지도 저장하지도 않는다. 결과는 `parse-triad.js`로 파싱.
+- 결과 파일: `round-N.<lens>.prompt.txt` / `.codex.txt` / `.codex.txt.json`. stdout = 요약 1줄(`status=… verdict=… issues=N questions=N sandbox=…`) + 파서 JSON.
 
-`<<<TRIAD-FINDINGS v1>>>` ~ `<<<END>>>` 펜스 블록만 파싱한다 (Codex stdout 공통):
-1. `^VERDICT\s*\|` -> verdict, `^ISSUE\s*\|` -> 이슈, `^QUESTION\s*\|` -> open_question.
-2. 펜스 밖(prompt echo, `^codex$`, `^tokens used$`, stderr `ERROR codex_core::session: failed to record rollout items`)은 전부 무시. fenced yaml 찾지 마라.
-2b. **Codex는 전체 응답을 2회 출력한다 -> 펜스가 2개면 첫 번째 블록만** 취한다. **권장:** codex 호출에 `--output-last-message FILE`를 주면 최종 메시지만 깨끗이 받아 중복 + hook/echo 노이즈가 소스에서 사라진다.
-3. **degrade (silent-drop 금지):** 펜스 부재 시 레거시 느슨 스캔(`^verdict:`) 1회 fallback; 그래도 verdict 추출 불가 시 해당 lens를 `verdict=DEGRADED`로 표기하고 `ISSUE | med | <lens> | 출력 파싱 불가 -> raw 확인/재실행` 1건을 남긴다. 라운드 전체를 fail시키지 않는다.
+실패한 lens도 exit 0 + `[fallback: <사유>]` 마커 → 파서가 `verdict=DEGRADED`. 사유: `timeout`, `codex-unavailable`(stderr 끝 300자 포함), `no-last-message`, `prompt-too-large`, `prompt-build-failed`, `interrupted`, `codex-output-contained-secret-pattern`·`prompt-modified-during-run`(이 둘은 보안 사건 - 판정에서 빼고 사용자에게 알린다). exit 2 = 인자·설정·설치 오류, carryover 누락, 또는 같은 렌즈가 아직 실행 중(고친 뒤 다시 실행; 다른 모델로 재시도하지 않는다). exit 130 = 중단(마커와 DEGRADED JSON은 남는다). 보안 사건 마커는 다음 실행 때 `*.incident.*`로 보존된다.
 
-**무해한 경고 무시**:
+샌드박스가 못 읽는 경로(예: Google Drive `H:`)의 사실 확인 자료는 `--context`로, 호출자가 덧붙일 지시(예: `/ddaro:review`의 코드 대조 지시)는 `--instructions`로 넘긴다(스크립트가 샌드박스 밖에서 읽어 넣는다). 샌드박스 없이 돌리기는 사용자가 요청할 때만 `TRIAD_CODEX_SANDBOX=bypass`. 실측(CLI 0.159.3 + gpt-6-astra, 24KB 프롬프트): effort high 44s, xhigh 113s, max 227s. max 이상은 `TRIAD_CODEX_TIMEOUT=480` 이상과 함께.
 
-```
-ERROR codex_core::session: failed to record rollout items: thread ... not found
-```
+### 출력 파서 (`parse-triad.js`, 헤더가 정본)
 
-stderr에 찍히지만 응답은 유효. 로그 파싱 시 필터링.
-
-### Tier 2: 결정론적 파서 (코드, 프로즈 파싱 대체)
-
-**v1.1 정정 (parse-triad.js 헤더가 정본):** 파서는 이제 (1) **모든 펜스 블록 스캔 → verdict 있고 issue 많은 블록 선택**(첫 블록만 X), (2) **severity 별칭 정규화**, (3) **degrade 시 파싱한 issue 보존**(marker prepend), (4) zero-width는 토큰 비교에만 strip. 위 산문의 '첫 블록만'/loose-scan 표현은 구버전 - 코드가 우선.
-
-위 v1 추출을 LLM 눈대중 대신 **코드**로 한다. lens 출력이 `$CODEX_OUT`로 확정된 뒤:
-
-    node "<이 skill 디렉토리>/parse-triad.js" "$CODEX_OUT" "$LENS" > "$CODEX_OUT.json"
-
-→ `{lens, verdict, degraded, issues:[..], questions:[..]}`. synthesis는 이 **구조화 레코드**로 triage. 첫 펜스 / 첫 verdict만, no-verdict→DEGRADED 규칙이 파서에 박힘. 자가 검증: `node parse-triad.js --selftest`. (triad-all과 동일 파일 - 가족 일관)
+→ `{lens, verdict, degraded, issues:[{severity,locus,text}], questions:[..]}`. 모든 펜스 블록 중 verdict가 있고 항목이 많은 블록을 고르고, severity 별칭을 정규화하고, verdict가 없으면 DEGRADED(이미 파싱한 issue는 보존). synthesis와 종결 판정(PASS)은 이 레코드로 한다. 자가 검증: `node parse-triad.js --selftest`.
 
 ### Fallback 정책
 
-Codex 호출 실패 시 (timeout, exit != 0, 빈 응답, YAML 추출 실패):
-1. 첫 실패 → Phase 0에서 선정한 폴백 모델로 1회 재시도. 성공 시 `state.json`에 `[model-fallback: <picked>]` 기록.
+Codex 호출 실패 시 (요약 줄 `status=degraded(timeout|codex-unavailable|no-last-message)`; `prompt-too-large`·`prompt-build-failed`는 재시도하지 않고, `secret-scrubbed(...)`는 보안 사건이라 재시도 없이 사용자에게 알린다):
+1. 첫 실패 → Phase 0에서 선정한 폴백 모델로 1회 재시도(`TRIAD_CODEX_MODEL=<slug>`를 붙여 같은 명령 재실행). 성공 시 `state.json`에 `[model-fallback: <picked>]` 기록.
 2. 재시도도 실패 → 해당 라운드의 해당 관점에 `[fallback: codex-unavailable]` 태그.
 3. `state.json`의 `rounds[N].fallbacks` 배열에 관점 이름 추가.
 4. 메인(Claude)이 해당 관점 프롬프트를 **자체적으로 local pass**. 결과에 동일 태그 유지.
@@ -257,7 +171,7 @@ docs/discussion/
     ├── state.json
     ├── round-1.md
     ├── round-1.llm.prompt.txt
-    ├── round-1.llm.codex.txt
+    ├── round-1.llm.codex.txt       # + .codex.txt.json (parse-triad.js)
     ├── round-1.architect.prompt.txt
     ├── round-1.architect.codex.txt
     ├── round-1.enduser.prompt.txt
@@ -277,20 +191,21 @@ docs/discussion/
 node verify-independence.js
 # 통과 = 다른 plugin/skill에 의존하지 않고, 필수 파일 모두 존재.
 node verify-independence.js --strict
-# 추가: Codex CLI 존재까지 체크.
+# 추가: parse-triad.js·codex-run.sh selftest + Codex CLI 존재까지 체크.
 ```
 
 ## 참조 (이 skill 내부에 한함)
 
 - 에이전트 프롬프트: `agents/llm-perspective.md`, `agents/architect-perspective.md`, `agents/enduser-perspective.md`
 - 템플릿: `templates/round.md`, `templates/consensus.md`
+- Codex 호출: `codex-run.sh` / 출력 파서: `parse-triad.js`
 - 자립성 체크: `verify-independence.js`
 
 ## 안티패턴
 
 - ❌ Codex 실패 시 조용히 Claude로 대체 — `[fallback]` 태그 필수.
 - ❌ 3 관점을 서로 다른 프롬프트 구조로 호출 — 모두 `agents/<lens>-perspective.md` 기반.
-- ❌ argv로 프롬프트 전달 — 항상 tempfile + stdin.
+- ❌ `codex exec`를 직접 호출하거나 자체 실행 스크립트를 만듦 — preamble·scrub·샌드박스·출력 계약이 빠진다. Codex는 `codex-run.sh`로만.
 - ❌ 코드 파일을 입력으로 받아 라운드 진행 — 거부 후 `/prism-codex`, `/mangchi` 안내.
 - ❌ 관점 정의를 프롬프트 맨 앞에 — 공통 prefix(대상 문서) 먼저.
 - ❌ 이미 합의된 쟁점을 다음 라운드에 재수록 — Round-Delta 위반.

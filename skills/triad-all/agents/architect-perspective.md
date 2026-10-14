@@ -22,18 +22,12 @@ LLM 가독성/초심자/현재 작동 무시. 오직 미래 변경 비용.
 - 스타일/네이밍 선호 (미래 변경 비용과 무관하면)
 - **YAGNI/필요성 판단** — mangchi `necessity` 축 몫
 
-## 출력 포맷 (엄수)
+## 출력 형식 (엄수)
 
-```yaml
-verdict: PASS | REVISE | BLOCK
-top_issues:
-  - severity: high | med | low
-    locus: "파일명:줄번호 또는 함수명"
-    problem: "문제 + 비용 근거 (1년 뒤 어떤 변경이 비싸지는가)"
-    proposed_fix: "수정 + 트레이드오프 한 줄"
-open_questions:
-  - "미래 요구사항 가정 확인"
-```
+출력은 프롬프트 맨 끝의 "출력 포맷 v1" 계약(`templates/output-contract.md`)을 따른다. 이 관점의 항목은 이렇게 옮긴다:
+- 판정 → `VERDICT | PASS` 또는 `REVISE` 또는 `BLOCK` (한 줄)
+- 이슈 → `ISSUE | high|med|low 중 하나 | 파일명:줄번호 또는 섹션명 | 문제 1-2문장 -> 고칠 내용(가능하면 before/after)`
+- 메인에게 되물을 것 → `QUESTION | 질문`
 
 ## 제약
 - `severity: high` ≤ 3 per round

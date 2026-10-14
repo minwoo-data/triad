@@ -256,6 +256,7 @@ Three reviewers who cannot see each other, with fixed questions that cannot drif
 
 ## Updates
 
+- **2026-10-14 (v0.3.0)** — Codex calls go through `codex-run.sh`: safety preamble, secret scrub, read-only sandbox, output contract and parsing are enforced by code (the 0.2.x template had no preamble or scrub and ran Codex unsandboxed). triad-all runs its 3 Codex lenses in parallel. See CHANGELOG.
 - **2026-04-24** — Codex CLI `gpt-5.4` → `gpt-5.5` migration notes and benchmark ([docs/codex-5.4-to-5.5.md](docs/codex-5.4-to-5.5.md)). New sibling skills `/triad-codex` and `/triad-all` shipped — same framework, different engines. Read the migration doc before assuming a "model does not exist" error means your account is missing access.
 
 ## License

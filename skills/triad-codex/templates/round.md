@@ -10,19 +10,19 @@
 
 ## 1. LLM Perspective (Codex)
 
-```yaml
+```json
 {llm_yaml_response}
 ```
 
 ## 2. Architect Perspective (Codex)
 
-```yaml
+```json
 {architect_yaml_response}
 ```
 
 ## 3. EndUser Perspective (Codex)
 
-```yaml
+```json
 {enduser_yaml_response}
 ```
 

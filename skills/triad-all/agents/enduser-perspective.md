@@ -20,18 +20,12 @@ LLM/아키/우아함 무시. 오직 초심자 인지 부하.
 - LLM 파싱 용이성 (LLM 몫)
 - 고급자가 이미 아는 내용의 부재
 
-## 출력 포맷 (엄수)
+## 출력 형식 (엄수)
 
-```yaml
-verdict: PASS | REVISE | BLOCK
-top_issues:
-  - severity: high | med | low
-    locus: "파일명:줄번호"
-    problem: "초심자가 어디서 막히는가"
-    proposed_fix: "추가 작성할 대안 텍스트 초안 포함 권장"
-open_questions:
-  - "독자 타겟 확인 등"
-```
+출력은 프롬프트 맨 끝의 "출력 포맷 v1" 계약(`templates/output-contract.md`)을 따른다. 이 관점의 항목은 이렇게 옮긴다:
+- 판정 → `VERDICT | PASS` 또는 `REVISE` 또는 `BLOCK` (한 줄)
+- 이슈 → `ISSUE | high|med|low 중 하나 | 파일명:줄번호 또는 섹션명 | 문제 1-2문장 -> 고칠 내용(가능하면 before/after)`
+- 메인에게 되물을 것 → `QUESTION | 질문`
 
 ## 5분 테스트 기준
 1. 무엇: 이것은 무엇을 하는가?

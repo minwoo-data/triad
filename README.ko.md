@@ -256,6 +256,7 @@ codex --version   # >= 0.125.0 이어야 함
 
 ## 업데이트 기록
 
+- **2026-10-14 (0.3.0)** — Codex 호출을 `codex-run.sh`로 옮김: 안전 문구·secret scrub·read-only 샌드박스·출력 계약·파싱을 코드가 강제한다(0.2.x 템플릿은 안전 문구와 scrub이 없었고 샌드박스 없이 돌았다). triad-all의 Codex 3 렌즈는 병렬로 돈다. 상세는 CHANGELOG.
 - **2026-04-24** — Codex CLI `gpt-5.4` → `gpt-5.5` 마이그레이션 기록 ([docs/codex-5.4-to-5.5.md](docs/codex-5.4-to-5.5.md)). 새 자매 skill `/triad-codex`, `/triad-all` 추가 — 같은 프레임워크, 다른 엔진. "model does not exist" 에러를 계정 문제로 단정하기 전에 읽어보세요.
 
 ## 라이선스

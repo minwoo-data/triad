@@ -23,7 +23,13 @@ const REQUIRED_FILES = [
   'agents/enduser-perspective.md',
   'templates/round.md',
   'templates/consensus.md',
+  'parse-triad.js',
+  'codex-run.sh',
+  'templates/output-contract.md',
 ];
+
+// Load-bearing scripts: under --strict each must pass its own --selftest, not just exist.
+const SELFTEST_SCRIPTS = ['parse-triad.js', 'codex-run.sh'];
 
 // triad-all requires both Claude Code (ambient — cannot probe) and Codex CLI.
 // Claude Code presence is assumed (the skill can't run without it). Only Codex
@@ -146,11 +152,55 @@ function checkPrerequisites() {
   }
 }
 
+// Windows: from PowerShell/cmd the first `bash` on PATH is often System32\bash.exe (the WSL
+// launcher), which cannot open C:\ paths. Prefer Git Bash; CODEX_RUN_BASH overrides.
+function resolveBash() {
+  if (process.env.CODEX_RUN_BASH) return process.env.CODEX_RUN_BASH;
+  if (process.platform !== 'win32') return 'bash';
+  const cands = [];
+  try {
+    const gitExec = execSync('git --exec-path', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+    cands.push(path.join(gitExec, '..', '..', '..', 'bin', 'bash.exe'));
+  } catch (e) { /* git not on PATH */ }
+  cands.push('C:\\Program Files\\Git\\bin\\bash.exe');
+  for (const c of cands) if (fs.existsSync(c)) return c;
+  return 'bash';
+}
+
+function checkScripts() {
+  const bash = resolveBash();
+  for (const rel of SELFTEST_SCRIPTS) {
+    const runner = rel.endsWith('.sh') ? bash : 'node';
+    try {
+      execSync(`"${runner}" "${path.join(SELF_DIR, rel)}" --selftest`, { stdio: ['ignore', 'pipe', 'pipe'], timeout: 600000 });
+      ok(`selftest passed: ${rel}`);
+    } catch (e) {
+      const text = `${e.stdout || ''}${e.stderr || ''}`;
+      const lines = text.split('\n').filter((l) => /FAIL|ERROR|WSL|not found/.test(l)).slice(0, 10).join('\n') || text.slice(-600);
+      fail(`selftest FAILED: ${rel} (runner: ${runner}${e.signal ? `, killed by ${e.signal}` : ''})\n${lines}`);
+    }
+  }
+}
+
+// The selftest only exercises a fake codex: the installed CLI must accept every flag codex-run.sh passes.
+function checkCodexFlags() {
+  let help = '';
+  try {
+    help = execSync('codex exec --help', { stdio: ['ignore', 'pipe', 'ignore'], timeout: 60000 }).toString();
+  } catch (e) {
+    fail('`codex exec --help` failed: cannot confirm the flags codex-run.sh needs');
+  }
+  const need = ['--config', '--sandbox', '--model', '--output-last-message', '--skip-git-repo-check', '--dangerously-bypass-approvals-and-sandbox'];
+  const missing = need.filter((f) => !help.includes(f));
+  if (missing.length) fail(`installed Codex CLI lacks ${missing.join(', ')} (codex-run.sh passes them)`);
+  ok(`Codex CLI accepts ${need.length} flags codex-run.sh passes`);
+}
+
 function main() {
   const strict = process.argv.includes('--strict');
   checkRequiredFiles();
   checkNoCrossRefs();
-  if (strict) checkPrerequisites();
+  if (strict) { checkScripts(); checkPrerequisites(); checkCodexFlags(); }
   process.stdout.write(`[verify-independence:${SELF_NAME}] PASS — skill is self-contained\n`);
   process.exit(0);
 }
