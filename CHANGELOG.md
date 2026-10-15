@@ -5,6 +5,33 @@ All notable changes to the Triad plugin are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.3.1] - 2026-10-14
+
+`/triad` now runs the `triad` skill directly. The duplicate `commands/triad.md` is gone: the
+skill was already user-invocable, so the plugin listed `triad` twice (about 90 always-on tokens)
+and every `/triad` read a 2.8k-token wrapper that only told the model to read SKILL.md.
+
+### Moved into `skills/triad/SKILL.md`
+- Argument table → §트리거 / 인자 (`<!-- args-table -->`), now also stating that arguments arrive
+  as `ARGUMENTS: ...`. Fixes a contradiction while at it: the old trigger line said a plain
+  `/triad <file>` writes an `updated.md` draft; Phase 3 and the command file said it does not.
+- No-argument AskUserQuestion menu → same section (`<!-- no-arg-menu -->`), JSON unchanged.
+- Short-document warning (about 30 lines) → Phase 0.
+- "Parallel subagents unavailable in this environment" warning → Fallback step 5.
+- CONSENSUS.md contents (final decisions + preserved dissent + timeline) → file-structure note.
+- Already in SKILL.md, not duplicated: the code refusal line, target-exists check, invariants
+  (target first, three parallel subagents, 3 high issues cap, round-delta, `--apply=original`
+  only), termination rules, main-local-pass fallback.
+- Not carried over: the command's `allowed-tools` list (it omitted `Agent`, which triad needs).
+
+### Added
+- `skills/triad/verify-entry.js`: fails (exit 2) when SKILL.md loses `user-invocable`, a row of
+  the argument table, the no-argument menu JSON, the code refusal line, the short-document
+  warning or the fallback tag. Each of those was broken once to confirm the check catches it.
+
+### Removed
+- `commands/triad.md` and the `"commands"` entry in `.claude-plugin/plugin.json`.
+
 ## [0.3.0] - 2026-10-14
 
 The Codex invocation contract is now a script. triad-all and triad-codex call

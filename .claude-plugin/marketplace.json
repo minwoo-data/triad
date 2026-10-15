@@ -10,7 +10,7 @@
       "name": "triad",
       "source": "./",
       "description": "3-perspective deliberation on one markdown/document file — LLM clarity, architectural longevity, end-user comprehension — parallel subagents until consensus. Documents only; code goes to /prism or /mangchi.",
-      "version": "0.3.0",
+      "version": "0.3.1",
       "author": {
         "name": "haroom",
         "url": "https://github.com/minwoo-data"
