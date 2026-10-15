@@ -37,14 +37,43 @@ description: 3-perspective deliberation on one markdown/document file - LLM clar
 
 이 3 렌즈는 고정이다. 추가/교체 금지 (다른 관점이 필요하면 별도 skill로).
 
-## 트리거
+## 트리거 / 인자
 
-- `/triad <file>` - read-only (원본 불변, `updated.md` 초안 생성)
-- `/triad <file> --apply` - md 대상이면 `updated.md`를 명시적으로 생성/갱신 (원본은 여전히 불변)
-- `/triad <file> --apply=original` - md 대상일 때만 원본 파일까지 Edit으로 반영 (가장 공격적). 코드는 항상 무시.
-- `/triad --continue <slug>` - 기존 토론 이어가기 (round-N+1)
-- `/triad --stop <slug>` - 강제 종결
-- 자연어: "triad로 검토해줘", "3관점으로 봐줘"
+`/triad`로 부르면 인자가 `ARGUMENTS: <...>`로 붙어 온다. 아래 표대로 해석한다.
+
+<!-- args-table -->
+| 인자 | 동작 |
+|---|---|
+| `<file>` (문서) | 새 토론. read-only: 원본 불변, `updated.md` 없음, 권고는 `round-N.md`·`CONSENSUS.md`에만 |
+| `<file> --apply` | 위 + 수락한 수정을 반영한 `docs/discussion/<slug>/updated.md` 생성/갱신 (원본 여전히 불변) |
+| `<file> --apply=original` | 위 + 원본 문서까지 Edit (가장 공격적) |
+| `<file>` (코드) | 거부: §입력 유형의 한 줄만 출력하고 종료. 세션을 만들지 않는다 |
+| `--continue <slug>` | `docs/discussion/<slug>/state.json`에서 이어가기 (round N+1) |
+| `--stop <slug>` | 지금 상태로 강제 종결 (`CONSENSUS.md` 작성) |
+| (인자 없음) | 아래 메뉴 |
+| 자연어 | "triad로 검토해줘", "3관점으로 봐줘" |
+<!-- /args-table -->
+
+**인자 없음** → AskUserQuestion을 아래 JSON 그대로 호출하고, 사용자가 고른 뒤 받은 파일 경로나 slug로 위 표를 다시 적용한다.
+
+<!-- no-arg-menu -->
+```json
+{
+  "questions": [
+    {
+      "question": "What do you want three perspectives to review?",
+      "header": "Triad (트라이어드)",
+      "options": [
+        {"label": "Markdown document", "description": "Review a document - LLM clarity + architect + end-user lenses. Original untouched by default."},
+        {"label": "Continue session", "description": "Resume an in-progress deliberation - you'll be asked for the slug"},
+        {"label": "Stop session", "description": "Force-close an in-progress deliberation"}
+      ],
+      "multiSelect": false
+    }
+  ]
+}
+```
+<!-- /no-arg-menu -->
 
 ## 입력 유형과 수정 권한
 
@@ -68,8 +97,9 @@ triad는 문서 전용입니다. 코드 리뷰는 /prism <file> (결함 탐지, 
 ## 7단계 워크플로우
 
 ### Phase 0: 초기화 (메인)
-- 입력 파일 존재 확인
+- 입력 파일 존재 확인 (`test -f "<file>"`)
 - **문서 파일인지 확인** - 코드 확장자면 거부 메시지 출력 후 종료 (§입력 유형)
+- 문서가 아주 짧으면(약 30줄 미만) 비용이 얻는 것보다 클 수 있다고 알리고 진행할지 묻는다
 - 슬러그 계산, 출력 디렉토리 생성
 - `source.md`로 원본 스냅샷 저장
 - `state.json` 생성: `{round: 1, status: "open", started_at, target_file}`
@@ -166,6 +196,7 @@ Phase 1의 YAML 포맷을 그대로 준수 (verdict/top_issues/open_questions).
 2. `round-N.md`의 해당 관점 섹션 상단에 **`[fallback: main-local-pass]`** 태그 표시.
 3. `state.json`의 `rounds[N].fallbacks` 배열에 관점 이름 추가.
 4. 같은 라운드에서 3 관점 중 2개 이상 fallback이면 **해당 라운드를 invalid 처리**하고 사용자에게 경고 후 중단 옵션 제시.
+5. 이 환경에서 서브에이전트 병렬 스폰 자체가 안 되면 시작 전에 사용자에게 알린다: 3 관점이 모두 local pass가 되어 리뷰 품질이 떨어진다.
 
 이 정책으로 tool 장애가 조용히 품질 저하로 이어지는 것을 방지.
 
@@ -179,7 +210,7 @@ docs/discussion/
     ├── round-1.md
     ├── round-2.md
     ├── ...
-    ├── CONSENSUS.md
+    ├── CONSENSUS.md                 # 최종 결정 + 보존된 반대 의견 + 타임라인
     └── updated.md                   # --apply 이상에서만 생성. 원본은 --apply=original에서만 교체.
 ```
 
@@ -190,6 +221,7 @@ docs/discussion/
 - Agent prompts: `agents/llm-perspective.md`, `agents/architect-perspective.md`, `agents/enduser-perspective.md`
 - Templates: `templates/round.md`, `templates/consensus.md`
 - Usage examples: `references/usage.md`
+- Entry contract check: `node verify-entry.js` (인자 표·인자 없음 메뉴·코드 거부·fallback·짧은 문서 경고가 SKILL.md에서 빠지면 실패)
 
 ## 안티패턴
 
