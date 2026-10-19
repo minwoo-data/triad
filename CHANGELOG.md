@@ -5,6 +5,54 @@ All notable changes to the Triad plugin are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.3.2] - 2026-10-18
+
+Security fixes in the shared safety core of `codex-run.sh`, ported from mangchi 0.4.0
+(main 996f145). A /prism-all review of mangchi PR #3 found them in the code all three plugins
+copied from prism 0.4.2. They are all LOW severity, and each needs an unusual condition: a
+shared TMPDIR, two calls of the same lens starting together, a signal at the wrong moment, or a
+failing `sed`.
+
+### Fixed
+- **Placeholder filter looked at the whole match** (PRISM-031). `EXAMPLE_API_KEY=<real value>`
+  or `DUMMY_SERVICE_TOKEN=<real value>` was dropped as an example because the key *name* said
+  example/dummy, so a leak with such a name was not quarantined. Now only the value counts, and
+  only when the whole value is a placeholder (`your_…`, `<…>`, `changeme…`, `xxxx`, `…`); for a
+  DSN, the password.
+- **A failing filter stage read as clean** (PRISM-020). The `sed`/placeholder stage and the PEM
+  base64 scan ran without a status check. A failure now returns "could not scan", which callers
+  treat as a hit (fail closed).
+- **Stale-scratch sweep could follow a planted symlink** (PRISM-017) and delete files outside
+  `$TMPDIR`. The sweep now skips symlinks and dirs owned by another user; `destroy` and
+  `destroy_dir` never shred through a link.
+- **Sweep could delete a scratch dir an orphaned Codex was still writing** (PRISM-024). A dead
+  attempt's dir is now swept only when nothing in it changed for 10 minutes.
+- **Lock race** (PRISM-019). A lock without a pid (an attempt that has just started) is not taken
+  over for 10 s. A stale lock is reclaimed by rename, so two runs cannot both take it. On exit an
+  attempt removes the lock only if it still holds its own pid. Exit 2 says
+  "another attempt of this call is starting".
+- **An interrupt during quarantine erased the incident** (PRISM-012). It used to leave
+  `[fallback: interrupted]`, which the skills treat as safe to re-run. Now the security marker
+  and `secret-scrubbed(...)` status stay.
+- **Cleanup failures were silent** (PRISM-021). The raw stream is deleted before publishing.
+  A file or scratch dir that cannot be deleted shows up as `cleanup_failed` in the JSON,
+  `cleanup_failed=<path>` in the summary line, and a CLEANUP FAILED line in an interrupt marker.
+
+### Changed
+- The shared code now sits between `BEGIN/END SHARED SAFETY CORE` markers, like mangchi's. Lines
+  that differ from mangchi are marked `triad:`. Lines marked `mangchi:` are the fixes above,
+  which prism 0.4.2 still lacks.
+- SKILL.md (triad-all, triad-codex): the status paragraph adds `scan-failed`, the "attempt
+  starting" exit 2, interrupts during quarantine, and `cleanup_failed` (tell the user which path
+  to delete).
+- `--selftest`: 42 → 54 cases in triad-all (53 in the triad-codex copy, which skips the one
+  triad-all-only case). Each fix above was reverted on its own (10 mutants), and every revert
+  failed its new test. The two symlink cases are skipped where native symlinks are not available,
+  such as Git Bash without Developer Mode. The portable-watchdog timing bound is 18 s, as in
+  mangchi (it was 12 s, which failed under load on Windows; the fake still sleeps 20 s).
+- `publish_json`'s fallback record (written when parse-triad.js cannot run) JSON-escapes the
+  `cleanup_failed` path, and a test checks that it parses.
+
 ## [0.3.1] - 2026-10-14
 
 `/triad` now runs the `triad` skill directly. The duplicate `commands/triad.md` is gone: the

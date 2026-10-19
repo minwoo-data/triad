@@ -32,18 +32,18 @@
 # Exit codes: 0 once the call ran or degraded -- a failed lens becomes a "[fallback: <reason>]"
 # marker and a verdict DEGRADED record, never a failed round. 2 = usage, configuration or
 # installation error (bad argument or env value, missing file or carryover, another attempt of the
-# same lens still running): fix it, do not retry with another model. 130 = interrupted
-# (INT/TERM/HUP): partial output destroyed, the interrupted marker and its JSON are still written.
+# same lens still running or just starting): fix it, do not retry with another model. 130 =
+# interrupted (INT/TERM/HUP): partial output destroyed, the interrupted marker and its JSON are still
+# written (a security marker instead when a leak was being quarantined). A JSON "cleanup_failed"
+# field (also cleanup_failed=<path> in the summary line) names unscrubbed output to delete by hand.
 #
 # Env: TRIAD_CODEX_EFFORT (high), TRIAD_CODEX_TIMEOUT (300, at most 570 so the caller's Bash
 #      timeout of (seconds+30)*1000 ms stays under 600000), TRIAD_CODEX_MODEL (optional -m, the
 #      fallback-model retry), TRIAD_CODEX_SANDBOX (read-only; bypass = explicit opt-out),
 #      TRIAD_CODEX_BIN (codex; the selftest points it at a fake).
 #
-# Ported from the prism plugin's codex-run.sh (0.4.2): preamble, scrub, sandbox, timeout, lock,
-# scratch and interrupt code are the same. Plugins stay independent, so each keeps its own copy;
-# fix security issues in both. The preamble exists because of a 2026-05-22 incident in which Codex
-# ran `docker compose config` during a review and printed six operator secrets into its output.
+# Preamble, scrub, credential refusal, lock, scratch and interrupt code is the SHARED SAFETY CORE
+# block below, the same code as mangchi's codex-run.sh (see the block header).
 # SINGLE-SOURCED within triad: canonical = triad-all/codex-run.sh and templates/output-contract.md;
 # triad-codex gets byte-identical copies from skills/sync-review-parsers.sh.
 # Created by: Minwoo Park
@@ -56,14 +56,38 @@ MAX_TIMEOUT=570
 PARSER=parse-triad.js
 PEM_HEADER='-----BEGIN (RSA |EC |DSA |OPENSSH |ENCRYPTED |)?PRIVATE KEY-----'
 B64_RUN='[A-Za-z0-9+/]{32,}={0,2}'
-# Example values reviewers write in suggested fixes; never real secrets.
-PLACEHOLDER='(your[-_ ]|changeme|change_me|example|placeholder|dummy|redacted|xxxx|[*]{4}|[.]{3})'
+# A whole VALUE (after KEY= or KEY:, the DSN password, or a bare token) that is only an example.
+# Lowercase, anchored, no interval expressions (portable awk).
+PLACEHOLDER_VALUE='^(your[-_ ].*|<[^>]*>|changeme.*|change_me.*|example.*|placeholder.*|dummy.*|redacted.*|xxxx+|[*][*][*][*].*|[.][.][.].*)$'
 SCRATCH_BASE="${TMPDIR:-${TEMP:-/tmp}}"
+STALE_SCRATCH_MIN=10   # a dead attempt's scratch is swept only when nothing in it changed for this long
+LOCK_GRACE=10          # seconds a lock dir may exist without its pid before it counts as abandoned
 
 die()  { echo "[codex-run:$SKILL_NAME] ERROR: $*" >&2; exit 2; }
 warn() { echo "[codex-run:$SKILL_NAME] WARN: $*" >&2; }
 
-# Invariant: prepended verbatim to every prompt. Origin: the 2026-05-22 incident (see the header).
+# The output contract has ONE source, templates/output-contract.md: the Codex prompt (here) and the
+# Claude agent prompt (`codex-run.sh prompt`) both append that file, so the two engines can never
+# be asked for different formats. The selftest fails if the file or its use goes missing.
+contract() { cat -- "$HERE/templates/output-contract.md"; }
+
+# ======================================================================================
+# BEGIN SHARED SAFETY CORE -- ported from mangchi 0.4.0 (main 996f145)
+# skills/mangchi/scripts/codex-run.sh, which ported it from prism 0.4.2 skills/prism-all/codex-run.sh.
+# Plugins stay independent, so each keeps its own copy: fix a security issue in prism, mangchi and
+# here. Lines marked "mangchi:" are mangchi's fixes from the /prism-all review of mangchi PR #3 that
+# triad 0.3.2 takes over and prism 0.4.2 still lacks: placeholder test on the value only (PRISM-031),
+# every filter stage of the secret scan checked (PRISM-020), stale-scratch sweep that skips
+# symlinks, other users' dirs and recently written dirs (PRISM-017, PRISM-024), destroy_dir refuses
+# symlinks and reports failure (PRISM-021), lock without a pid is not stolen during its grace
+# period, stale locks are reclaimed by rename and only the owner removes a lock (PRISM-019), an
+# interrupt during quarantine keeps the incident (PRISM-012), cleanup failures are reported
+# (PRISM-021). Lines marked "triad:" differ from mangchi. The preamble exists because of a
+# 2026-05-22 incident in which Codex ran `docker compose config` during a review and printed six
+# operator secrets into its output.
+# ======================================================================================
+
+# Invariant: prepended verbatim to every prompt.
 preamble() {
 cat <<'EOF'
 SANDBOX SAFETY POLICY (mandatory, applies to every shell command you execute):
@@ -100,11 +124,6 @@ emit secrets in the first place.
 EOF
 }
 
-# The output contract has ONE source, templates/output-contract.md: the Codex prompt (here) and the
-# Claude agent prompt (`codex-run.sh prompt`) both append that file, so the two engines can never
-# be asked for different formats. The selftest fails if the file or its use goes missing.
-contract() { cat -- "$HERE/templates/output-contract.md"; }
-
 # Invariant: an output holding any of these (outside the allow set) is quarantined. One ERE per
 # line. KEY=value forms accept quoted keys/values and longer names (AWS_SECRET_ACCESS_KEY,
 # STRIPE_SECRET_KEY, ...); values are ASCII without quotes, backticks or brackets so a quoted or
@@ -128,22 +147,41 @@ eyJ[A-Za-z0-9_-]{10,}[.]eyJ[A-Za-z0-9_-]{10,}[.][A-Za-z0-9_-]{10,}
 EOF
 }
 
+# mangchi: drops a match only when its VALUE as a whole is a placeholder (your_api_key_here, <token>,
+# changeme, xxxx). The key name never counts: EXAMPLE_API_KEY=<real value> is a secret (PRISM-031).
+drop_placeholders() {
+  awk -v ph="$PLACEHOLDER_VALUE" '
+    { s = $0; v = s
+      if (match(s, /:\/\/[^\/[:space:]:@]+:[^\/[:space:]:@]+@/)) {
+        v = substr(s, RSTART + 3, RLENGTH - 4); sub(/^[^:]*:/, "", v)
+      } else if (match(s, /^[A-Za-z0-9_]+[\047"]?[[:space:]]*[:=][[:space:]]*[\047"]?/)) {
+        v = substr(s, RSTART + RLENGTH)
+      }
+      if (tolower(v) ~ ph) next
+      print s }'
+}
+
 # Prints every secret-shaped string in the given files, one per line: trailing punctuation trimmed,
 # placeholders dropped. A PEM header is the same text for every key, so when one is present every
 # base64 run of 32+ characters is printed too (key body lines, with or without a log prefix).
-# Returns 2 when a file cannot be scanned: callers treat that as a hit (fail closed).
+# Returns 2 when a file cannot be scanned or any stage fails: callers treat that as a hit (fail
+# closed).
 secret_strings() {
-  local f st found
+  local f st found kept
   for f in "$@"; do { [ -f "$f" ] && [ -r "$f" ]; } || return 2; done
   found="$(grep -ohaE -f <(secret_patterns) -- "$@")"; st=$?
   [ "$st" -le 1 ] || return 2
   if [ "$st" -eq 0 ]; then
-    printf '%s\n' "$found" | sed -E 's/[.,;:!?)]+$//' | grep -viE -e "$PLACEHOLDER"
+    # mangchi: pipefail, so a failed sed or awk can never empty the list and pass as clean (PRISM-020)
+    kept="$(set -o pipefail; printf '%s\n' "$found" | sed -E 's/[.,;:!?)]+$//' | drop_placeholders)" || return 2
+    [ -z "$kept" ] || printf '%s\n' "$kept"
   fi
   grep -qaE -e "$PEM_HEADER" -- "$@"; st=$?
   [ "$st" -le 1 ] || return 2
   if [ "$st" -eq 0 ]; then
-    cat -- "$@" | grep -ohaE -e "$B64_RUN"
+    kept="$(grep -ohaE -e "$B64_RUN" -- "$@")"; st=$?
+    [ "$st" -le 1 ] || return 2
+    [ -z "$kept" ] || printf '%s\n' "$kept"
   fi
   return 0
 }
@@ -159,9 +197,8 @@ has_secret() {
 # failed (callers fail closed with their own reason). The allow set is what the prompt contained
 # before Codex ran, kept in this process's memory so a Codex that rewrites the prompt file cannot
 # widen it. Why allow at all: codex exec echoes the prompt into its raw stream, so a target with
-# secret-shaped test fixtures would otherwise quarantine every angle. A string the target already
-# held is not a new disclosure (the orchestrator read the target to build the prompt); anything
-# Codex found elsewhere is.
+# secret-shaped test fixtures would otherwise quarantine every call. A string the target already
+# held is not a new disclosure; anything Codex found elsewhere is.
 new_secret_in() {
   local allow="$1" f m found existing=()
   shift
@@ -176,7 +213,7 @@ new_secret_in() {
   return 1
 }
 
-# Refuse obvious credential files as targets: the wrapper itself would copy them into the prompt.
+# Refuse obvious credential files as input: the wrapper itself would copy them into the prompt.
 # Same families as the preamble's list, case-insensitive.
 is_credential_file() {
   local b
@@ -208,22 +245,26 @@ credential_path() {
 destroy() {
   local f
   for f in "$@"; do
-    [ -e "$f" ] || continue
-    if command -v shred >/dev/null 2>&1; then shred -uz -- "$f" 2>/dev/null || rm -f -- "$f"; else rm -f -- "$f"; fi
+    [ -e "$f" ] || [ -L "$f" ] || continue
+    if [ ! -L "$f" ] && command -v shred >/dev/null 2>&1; then shred -uz -- "$f" 2>/dev/null || rm -f -- "$f"; else rm -f -- "$f"; fi
   done
-  for f in "$@"; do [ -e "$f" ] && return 1; done
+  for f in "$@"; do { [ -e "$f" ] || [ -L "$f" ]; } && return 1; done
   return 0
 }
 
+# 0 = the dir is gone. mangchi: never through a symlink, and the result is reported (PRISM-017,
+# PRISM-021).
 destroy_dir() {
   local f
+  [ -L "$1" ] && return 1
   [ -d "$1" ] || return 0
-  for f in "$1"/* "$1"/.[!.]*; do [ -f "$f" ] && destroy "$f"; done
-  rm -rf -- "$1"
+  for f in "$1"/* "$1"/.[!.]*; do [ -f "$f" ] && [ ! -L "$f" ] && destroy "$f"; done
+  rm -rf -- "$1" 2>/dev/null
+  [ ! -e "$1" ]
 }
 
 # Printable ASCII only, fence brackets removed: a failed call's stderr tail must never parse as an
-# answer (parsers also split on U+2028/U+2029).
+# answer (triad: parse-triad.js also splits on U+2028/U+2029).
 sanitized_tail() { tail -c 300 "$1" 2>/dev/null | LC_ALL=C tr -c '[:print:]' ' ' | tr -d '<>'; }
 
 # GNU coreutils timeout only: Windows ships an unrelated timeout.exe.
@@ -246,6 +287,7 @@ warn_secret_files_in_cwd() {
     [ -f "$f" ] && found+=("$f")
   done
   shopt -u nullglob
+  # triad: Codex runs in the caller's cwd (no -C), so the warning says so
   [ ${#found[@]} -gt 0 ] && warn "cwd holds secret-shaped files (${found[*]}); Codex runs here with shell access. Prefer a directory without them."
   return 0
 }
@@ -259,68 +301,70 @@ archive_incident() {
   esac
 }
 
+file_mtime() { stat -c %Y -- "$1" 2>/dev/null || stat -f %m -- "$1" 2>/dev/null || date +%s; }
+
 # One attempt per output at a time: a second attempt would publish over the first.
 CR_LOCK=""
 take_lock() {
-  local lock="$1" pid
+  local lock="$1" pid age
   if ! mkdir "$lock" 2>/dev/null; then
     pid="$(cat "$lock/pid" 2>/dev/null)"
     if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
       die "another attempt of this call is still running (pid $pid); wait for it or stop it first"
     fi
-    rm -rf -- "$lock"; mkdir "$lock" 2>/dev/null || die "cannot lock $lock"
+    # mangchi: a lock without a pid may belong to an attempt that created it a moment ago (PRISM-019)
+    if [ -z "$pid" ]; then
+      age=$(( $(date +%s) - $(file_mtime "$lock") ))
+      [ "$age" -ge "$LOCK_GRACE" ] || die "another attempt of this call is starting (lock without a pid, ${age}s old); retry in a few seconds"
+    fi
+    # Reclaim by rename: of two attempts that both found it abandoned, only one rename succeeds.
+    mv -- "$lock" "$lock.stale.$$" 2>/dev/null || die "lost the race for $lock to another attempt; retry"
+    rm -rf -- "$lock.stale.$$"
+    mkdir "$lock" 2>/dev/null || die "cannot lock $lock"
   fi
-  echo "$$" > "$lock/pid"; CR_LOCK="$lock"
+  { echo "$$" > "$lock/pid.$$" && mv -f -- "$lock/pid.$$" "$lock/pid"; } || die "cannot write $lock/pid"
+  CR_LOCK="$lock"
 }
 
-# Unscrubbed Codex output lives here, outside the (possibly committed) run dir. A hard kill skips
-# every trap, so later runs remove scratch dirs whose owner process is gone.
+# Unscrubbed Codex output lives here, outside the (often committed) discussion dir. A hard kill
+# skips every trap, so later runs remove scratch dirs whose owner process is gone.
 CR_SCRATCH=""
 make_scratch() {
   local d pid
   for d in "$SCRATCH_BASE"/codex-run-"$SKILL_NAME"-*; do
-    [ -d "$d" ] || continue
+    # mangchi: never follow a planted symlink or touch another user's dir (PRISM-017), and leave a
+    # dir alone while anything in it changed recently: an orphaned Codex may still write there
+    # (PRISM-024).
+    [ -L "$d" ] && continue
+    { [ -d "$d" ] && [ -O "$d" ]; } || continue
     pid="${d##*/codex-run-"$SKILL_NAME"-}"; pid="${pid%%-*}"
     case "$pid" in ''|*[!0-9]*) continue ;; esac
-    kill -0 "$pid" 2>/dev/null || destroy_dir "$d"
+    kill -0 "$pid" 2>/dev/null && continue
+    [ -n "$(find "$d" -mmin -"$STALE_SCRATCH_MIN" 2>/dev/null | head -1)" ] && continue
+    destroy_dir "$d" || warn "could not delete stale scratch $d (it may hold unscrubbed Codex output): delete it by hand"
   done
   CR_SCRATCH="$(mktemp -d "$SCRATCH_BASE/codex-run-$SKILL_NAME-$$-XXXXXX")" || die "cannot create a scratch dir in $SCRATCH_BASE"
 }
 
 cr_exit() {
-  [ -n "$CR_SCRATCH" ] && destroy_dir "$CR_SCRATCH"
-  [ -n "$CR_LOCK" ] && rm -rf -- "$CR_LOCK"
+  if [ -n "$CR_SCRATCH" ]; then
+    destroy_dir "$CR_SCRATCH" || warn "could not delete scratch $CR_SCRATCH (it may hold unscrubbed Codex output): delete it by hand"
+  fi
+  # mangchi: only the owner removes the lock (PRISM-019)
+  if [ -n "$CR_LOCK" ] && [ "$(cat "$CR_LOCK/pid" 2>/dev/null)" = "$$" ]; then rm -rf -- "$CR_LOCK"; fi
   CR_SCRATCH=""; CR_LOCK=""
 }
 
-# Parse $1 into $1.json and stamp the run metadata; prints the summary counts. 1 = parse failed.
-publish_json() {
-  local out="$1" name="$2" st="$3" tmp="$1.json.tmp.$$"
-  if node "$HERE/$PARSER" "$out" "$name" > "$tmp" 2>/dev/null && node -e '
-      const fs = require("fs");
-      const [f, status, model, effort, sandbox, secs] = process.argv.slice(1);
-      const j = JSON.parse(fs.readFileSync(f, "utf8"));
-      Object.assign(j, { status, model, effort, sandbox, seconds: Number(secs) });
-      fs.writeFileSync(f, JSON.stringify(j));
-      process.stdout.write(`verdict=${j.verdict} issues=${(j.issues || []).length} questions=${(j.questions || []).length} degraded=${!!j.degraded}`);
-    ' "$tmp" "$st" "$META_MODEL" "$META_EFFORT" "$META_SANDBOX" "$META_SECONDS" 2>/dev/null && mv -f "$tmp" "$out.json"; then
-    return 0
-  fi
-  rm -f "$tmp"
-  printf '{"lens":"%s","verdict":"DEGRADED","degraded":true,"issues":[],"questions":[],"status":"%s","error":"parse-triad.js failed (is node on PATH?)"}\n' "$name" "$st" > "$out.json"
-  printf 'verdict=DEGRADED degraded=true'
-  return 1
-}
-
 # Interrupt handler: stop Codex, destroy partial output, leave the marker and its JSON. Globals
-# because a trap can fire from anywhere in cmd_run.
-CR_CHILD=""; CR_WD=""; CR_OUT=""; CR_NAME=""
+# because a trap can fire from anywhere in cmd_lens.
+CR_CHILD=""; CR_WD=""; CR_OUT=""; CR_INCIDENT=""; CR_STREAM=""; CLEANUP_FAILED=""
+CR_NAME=""   # triad: the lens, for publish_json
 META_MODEL=default; META_EFFORT=""; META_SANDBOX=""; META_SECONDS=0
 # Codex and the watchdog run as their own process groups (set -m): a group kill reaches every
 # descendant, not just the launcher.
 kill_group() { kill "-$1" -- "-$2" 2>/dev/null || kill "-$1" "$2" 2>/dev/null; }
 cr_interrupted() {
-  local i=0
+  local i=0 st left=""
   [ -n "$CR_WD" ] && kill_group TERM "$CR_WD"
   if [ -n "$CR_CHILD" ]; then
     kill_group TERM "$CR_CHILD"
@@ -329,12 +373,56 @@ cr_interrupted() {
     kill_group KILL "$CR_CHILD"
     wait "$CR_CHILD" 2>/dev/null
   fi
-  [ -n "$CR_SCRATCH" ] && destroy_dir "$CR_SCRATCH"; CR_SCRATCH=""
+  if [ -n "$CR_SCRATCH" ]; then destroy_dir "$CR_SCRATCH" || left="$CR_SCRATCH"; fi
+  CR_SCRATCH=""
   if [ -n "$CR_OUT" ]; then
-    echo "[fallback: interrupted] the wrapper was stopped before Codex finished; partial output destroyed" > "$CR_OUT"
-    [ -n "$CR_NAME" ] && publish_json "$CR_OUT" "$CR_NAME" "degraded(interrupted)" >/dev/null
+    if [ -n "$CR_INCIDENT" ]; then
+      # mangchi: a leak was already detected; the interrupt must not turn the incident into an
+      # ordinary re-runnable degraded run (PRISM-012)
+      echo "[fallback: $CR_INCIDENT] stream=$CR_STREAM (interrupted during quarantine; do not auto-retry, tell the user)" > "$CR_OUT"
+      st="secret-scrubbed($CR_INCIDENT)"
+    elif [ -z "$left" ]; then
+      echo "[fallback: interrupted] the wrapper was stopped before Codex finished; partial output destroyed" > "$CR_OUT"
+      st="degraded(interrupted)"
+    else
+      echo "[fallback: interrupted] the wrapper was stopped before Codex finished" > "$CR_OUT"
+      st="degraded(interrupted)"
+    fi
+    if [ -n "$left" ]; then
+      echo "[fallback: CLEANUP FAILED: delete $left by hand; it may hold unscrubbed Codex output]" >> "$CR_OUT"
+      CLEANUP_FAILED="$left"
+    fi
+    [ -n "$CR_NAME" ] && publish_json "$CR_OUT" "$CR_NAME" "$st" >/dev/null   # triad: parse-triad.js JSON
   fi
   exit 130
+}
+
+# ======================================================================================
+# END SHARED SAFETY CORE
+# ======================================================================================
+
+# Parse $1 into $1.json and stamp the run metadata (and cleanup_failed when a scratch file could
+# not be deleted); prints the summary counts. 1 = parse failed.
+publish_json() {
+  local out="$1" name="$2" st="$3" tmp="$1.json.tmp.$$" cf bs='\' q='"'
+  if node "$HERE/$PARSER" "$out" "$name" > "$tmp" 2>/dev/null && node -e '
+      const fs = require("fs");
+      const [f, status, model, effort, sandbox, secs, cleanup] = process.argv.slice(1);
+      const j = JSON.parse(fs.readFileSync(f, "utf8"));
+      Object.assign(j, { status, model, effort, sandbox, seconds: Number(secs) });
+      if (cleanup) j.cleanup_failed = cleanup;
+      fs.writeFileSync(f, JSON.stringify(j));
+      process.stdout.write(`verdict=${j.verdict} issues=${(j.issues || []).length} questions=${(j.questions || []).length} degraded=${!!j.degraded}`);
+    ' "$tmp" "$st" "$META_MODEL" "$META_EFFORT" "$META_SANDBOX" "$META_SECONDS" "$CLEANUP_FAILED" 2>/dev/null && mv -f "$tmp" "$out.json"; then
+    return 0
+  fi
+  rm -f "$tmp"
+  # JSON-escape the path (quoted replacements stay literal under bash 5.2 patsub_replacement)
+  cf="${CLEANUP_FAILED//"$bs"/"$bs$bs"}"; cf="${cf//"$q"/"$bs$q"}"
+  printf '{"lens":"%s","verdict":"DEGRADED","degraded":true,"issues":[],"questions":[],"status":"%s","error":"parse-triad.js failed (is node on PATH?)"%s}\n' \
+    "$name" "$st" "${cf:+,\"cleanup_failed\":\"$cf\"}" > "$out.json"
+  printf 'verdict=DEGRADED degraded=true'
+  return 1
 }
 
 cmd_usage="usage: codex-run.sh lens|prompt <discussion-dir> <round> <llm|architect|enduser> --target <doc> [--context F]... [--instructions F] [--no-carryover]"
@@ -446,6 +534,7 @@ cmd_lens() {
   echo "[fallback: not-started]" > "$out" || die "cannot write in $dir"
 
   META_MODEL="${TRIAD_CODEX_MODEL:-default}"; META_EFFORT="$effort"; META_SANDBOX="$sandbox"; META_SECONDS=0
+  CLEANUP_FAILED=""; CR_INCIDENT=""; CR_STREAM=""
   local status="" took=0 bytes rc allow="" found=""
   if ! ( preamble; printf '\n==== AGENT PROMPT BELOW ====\n'; build_body ) > "$work"; then
     echo "[fallback: prompt-build-failed] the target, a context, the instructions, the carryover or the perspective could not be read" > "$out"
@@ -511,25 +600,24 @@ cmd_lens() {
 
     # Scrub FIRST, over the prompt, the raw stream AND the last message, before anything is copied
     # anywhere (that includes the stderr tail used in the fallback markers below).
-    local leak="" stream="" r f
+    local leak="" r f
     for f in prompt raw msg; do
       case "$f" in prompt) new_secret_in "$allow" "$work" ;; raw) new_secret_in "$allow" "$raw" ;; msg) new_secret_in "$allow" "$msg" ;; esac
       r=$?
       if [ "$r" -eq 0 ]; then
-        stream="$f"; leak="codex-output-contained-secret-pattern"
-        [ "$f" = prompt ] && leak="prompt-modified-during-run"
-        break
+        leak="codex-output-contained-secret-pattern"; [ "$f" = prompt ] && leak="prompt-modified-during-run"
+        CR_STREAM="$f"; CR_INCIDENT="$leak"; break
       elif [ "$r" -eq 2 ]; then
-        stream="$f"; leak="scan-failed"; break
+        leak="scan-failed"; CR_STREAM="$f"; CR_INCIDENT="$leak"; break
       fi
     done
     if [ -n "$leak" ]; then
       local gone=1
       destroy "$work" "$raw" "$msg" || gone=0
       {
-        echo "[fallback: $leak] stream=$stream"
+        echo "[fallback: $leak] stream=$CR_STREAM"
         if [ "$leak" = scan-failed ]; then
-          echo "[fallback: the $stream could not be scanned for secrets, so it was treated as a leak and"
+          echo "[fallback: the $CR_STREAM could not be scanned for secrets, so it was treated as a leak and"
           echo "[fallback: deleted (fail closed). Check the disk/permissions, then re-run."
         else
           echo "[fallback: this codex lens wrote secret-shaped content that was not in its prompt (it"
@@ -539,8 +627,8 @@ cmd_lens() {
         fi
         [ "$gone" -eq 1 ] || echo "[fallback: CLEANUP FAILED: delete $work $raw $msg by hand]"
       } > "$out"
-      echo "::warning::$SKILL_NAME: codex/$angle $leak ($stream); sanitized + deleted$([ "$gone" -eq 1 ] || echo ' (CLEANUP FAILED)')" >&2
-      status="secret-scrubbed($leak)"; [ "$gone" -eq 1 ] || status="secret-scrubbed($leak,cleanup-failed)"
+      echo "::warning::$SKILL_NAME: codex/$angle $leak ($CR_STREAM); sanitized + deleted$([ "$gone" -eq 1 ] || echo ' (CLEANUP FAILED)')" >&2
+      status="secret-scrubbed($leak)"; [ "$gone" -eq 1 ] || { status="secret-scrubbed($leak,cleanup-failed)"; CLEANUP_FAILED="$CR_SCRATCH"; }
     else
       mv -f "$work" "$prompt"
       if [ "$rc" -ne 0 ]; then
@@ -561,6 +649,8 @@ cmd_lens() {
         echo "[fallback: no-last-message] codex exited 0 after ${took}s without a final message: $(sanitized_tail "$raw")" > "$out"
         status="degraded(no-last-message)"
       fi
+      # The raw stream (it passed the scan) goes now, and a failure is recorded (PRISM-021).
+      destroy "$raw" || CLEANUP_FAILED="$raw"
     fi
     trap - INT TERM HUP
     CR_OUT=""; CR_NAME=""
@@ -568,7 +658,7 @@ cmd_lens() {
 
   local meta="model=$META_MODEL effort=$effort sandbox=$sandbox seconds=$took" counts
   counts="$(publish_json "$out" "$lens" "$status")" || status="$status+parse-failed"
-  echo "[codex-run] $SKILL_NAME round $round $lens: status=$status $counts $meta out=$out"
+  echo "[codex-run] $SKILL_NAME round $round $lens: status=$status $counts $meta out=$out${CLEANUP_FAILED:+ cleanup_failed=$CLEANUP_FAILED}"
   cat "$out.json"; echo
   return 0
 }
@@ -587,6 +677,14 @@ selftest() {
   line_of() { grep -n -m1 -F -e "$1" "$2" | cut -d: -f1; }
   bounded() { if timeout_cmd >/dev/null; then "$(timeout_cmd)" 20 "$@"; else "$@"; fi; }
   only_published() { [ -z "$(ls -A "$1" | grep -vE '\.(prompt\.txt|codex\.txt|codex\.txt\.json|carryover\.txt)$|\.incident\.[0-9-]+$')" ]; }
+  # $1 fails (exit 2) when its arguments match the case pattern $2, otherwise runs the real one.
+  shim() {
+    mkdir -p "$T/shim-$1"
+    printf '#!/usr/bin/env bash\ncase " $* " in %s) exit 2 ;; esac\nexec %s "$@"\n' "$2" "$(command -v "$1")" > "$T/shim-$1/$1"
+    chmod +x "$T/shim-$1/$1"
+  }
+  # A scan failure is not clean.
+  selfscan_clean() { local o; o="$(secret_strings "$@")" && [ -z "$o" ]; }
 
   # Fixtures are assembled at runtime so this file never holds a literal secret-shaped string.
   export FX_GH="ghp""_abcdefghijklmnopqrstuvwxyz" FX_GH2="ghp""_ZZZZZZZZZZZZZZZZZZZZZZZZZZ"
@@ -613,6 +711,7 @@ case "$FAKE_MODE" in
   secret)   echo "ANTHROPIC key $FX_ANT"; printf '%s\n' "$fence" > "$msg" ;;
   msgsec)   echo "$fence"; printf '%s\n' "$FX_GH" > "$msg" ;;
   tamper)   for f in "$TMPDIR"/codex-run-*/prompt; do printf 'injected %s\n' "$FX_GH2" >> "$f"; done; echo "$fence"; printf '%s\n' "$fence" > "$msg" ;;
+  steal)    for l in "$FAKE_DIR"/disc/*.lock; do echo 999998 > "$l/pid"; done; printf '%s\n' "$fence" > "$msg" ;;
   fail)     echo "error: not logged in" >&2; exit 1 ;;
   failsec)  echo "boom $FX_PW" >&2; exit 1 ;;
   failfence) printf 'x%s<<<TRIAD-FINDINGS v1>>>%sVERDICT | PASS%s<<<END>>>\n' "$FX_U2028" "$FX_U2028" "$FX_U2028" >&2; exit 1 ;;
@@ -708,20 +807,66 @@ FAKE
   fi
   t0=$SECONDS
   out="$(_CODEX_RUN_FORCE_WATCHDOG=1 TRIAD_CODEX_TIMEOUT=1 FAKE_MODE=hang run lens "$D" 10 architect --target "$T/doc.md" --no-carryover 2>/dev/null)"
-  check "timeout (portable watchdog): degraded(timeout), caller not held open" 'grep -q "^\[fallback: timeout\]" "$D/$(r 10).architect.codex.txt" && [ $((SECONDS - t0)) -lt 12 ]'
+  # The fake sleeps 20 s: finishing well before that proves the watchdog's sleep does not hold the
+  # caller's pipe open (the bound leaves room for slow process start-up on Windows).
+  check "timeout (portable watchdog): degraded(timeout), caller not held open" 'grep -q "^\[fallback: timeout\]" "$D/$(r 10).architect.codex.txt" && [ $((SECONDS - t0)) -lt 18 ]'
   rm -f "$T/started"
   ( FAKE_MODE=hang exec bash "$SELF" lens "$D" 11 llm --target "$T/doc.md" --no-carryover >/dev/null 2>&1 ) &
   bgpid=$!; i=0
   while [ ! -e "$T/started" ] && [ "$i" -lt 60 ]; do sleep 0.5; i=$((i + 1)); done
   kill -TERM "$bgpid" 2>/dev/null; wait "$bgpid"; rc=$?
   check "interrupted: exit 130, marker and DEGRADED json, no scratch or lock left" '[ $rc -eq 130 ] && grep -q "^\[fallback: interrupted\]" "$D/$(r 11).llm.codex.txt" && grep -q "\"status\":\"degraded(interrupted)\"" "$D/$(r 11).llm.codex.txt.json" && only_published "$D" && [ -z "$(ls -A "$TMPDIR" | grep codex-run-)" ]'
+  # An interrupt while a leak is being quarantined keeps the incident: the first shred stalls.
+  mkdir -p "$T/shim-slowshred"
+  printf '#!/usr/bin/env bash\n[ -e "%s" ] || { : > "%s"; : > "%s"; sleep 3; }\nfor a; do f="$a"; done; rm -f -- "$f"\n' "$T/shredonce" "$T/shredonce" "$T/started" > "$T/shim-slowshred/shred"
+  chmod +x "$T/shim-slowshred/shred"; rm -f "$T/started" "$T/shredonce"
+  ( PATH="$T/shim-slowshred:$PATH" FAKE_MODE=secret exec bash "$SELF" lens "$D" 11 architect --target "$T/doc.md" --no-carryover >/dev/null 2>&1 ) &
+  bgpid=$!; i=0
+  while [ ! -e "$T/started" ] && [ "$i" -lt 60 ]; do sleep 0.25; i=$((i + 1)); done
+  kill -TERM "$bgpid" 2>/dev/null; wait "$bgpid"; rc=$?
+  O="$D/$(r 11).architect.codex.txt"
+  check "interrupted during quarantine: the security marker and status survive" '[ $rc -eq 130 ] && grep -q "^\[fallback: codex-output-contained-secret-pattern\] stream=raw" "$O" && grep -q "\"status\":\"secret-scrubbed(codex-output-contained-secret-pattern)\"" "$O.json" && ! grep -q "$FX_ANT" "$O" && [ -z "$(ls -A "$TMPDIR" | grep codex-run-)" ]'
   mkdir -p "$D/$(r 12).llm.codex.txt.lock"; echo "$$" > "$D/$(r 12).llm.codex.txt.lock/pid"
   FAKE_MODE=ok run lens "$D" 12 llm --target "$T/doc.md" --no-carryover >/dev/null 2>&1; rc=$?
   check "a second attempt while the first still runs is refused (exit 2)" '[ $rc -eq 2 ]'
   echo 999999 > "$D/$(r 12).llm.codex.txt.lock/pid"
-  mkdir -p "$TMPDIR/codex-run-$SKILL_NAME-999999-abcdef"; printf 'unscrubbed\n' > "$TMPDIR/codex-run-$SKILL_NAME-999999-abcdef/raw"
   FAKE_MODE=ok run lens "$D" 12 llm --target "$T/doc.md" --no-carryover >/dev/null 2>&1
-  check "stale lock taken over; a hard-killed run's scratch swept" 'grep -q "step 2 is ambiguous" "$D/$(r 12).llm.codex.txt" && [ ! -e "$TMPDIR/codex-run-$SKILL_NAME-999999-abcdef" ]'
+  check "a stale lock from a dead attempt is taken over" 'grep -q "step 2 is ambiguous" "$D/$(r 12).llm.codex.txt" && [ ! -e "$D/$(r 12).llm.codex.txt.lock" ]'
+  mkdir -p "$D/$(r 12).architect.codex.txt.lock"
+  FAKE_MODE=ok run lens "$D" 12 architect --target "$T/doc.md" --no-carryover >/dev/null 2>&1; rc=$?
+  check "a fresh lock without a pid (an attempt starting) is not stolen (exit 2)" '[ $rc -eq 2 ] && [ -d "$D/$(r 12).architect.codex.txt.lock" ]'
+  touch -d '1 minute ago' "$D/$(r 12).architect.codex.txt.lock"
+  FAKE_MODE=ok run lens "$D" 12 architect --target "$T/doc.md" --no-carryover >/dev/null 2>&1; rc=$?
+  check "... but one abandoned past the grace period is reclaimed" '[ $rc -eq 0 ] && grep -q "step 2 is ambiguous" "$D/$(r 12).architect.codex.txt" && [ ! -e "$D/$(r 12).architect.codex.txt.lock" ]'
+  FAKE_MODE=steal run lens "$D" 12 enduser --target "$T/doc.md" --no-carryover >/dev/null 2>&1
+  check "a lock another attempt took over meanwhile is not removed on exit" '[ "$(cat "$D/$(r 12).enduser.codex.txt.lock/pid" 2>/dev/null)" = 999998 ]'
+  rm -rf "$D/$(r 12).enduser.codex.txt.lock"
+  local dead="$TMPDIR/codex-run-$SKILL_NAME-999999-abcdef" err
+  mkdir -p "$dead"; printf 'unscrubbed\n' > "$dead/raw"
+  FAKE_MODE=ok run lens "$D" 12 llm --target "$T/doc.md" --no-carryover >/dev/null 2>&1
+  check "a dead attempt's scratch written recently is left alone (an orphaned Codex may still write)" '[ -e "$dead/raw" ]'
+  touch -d '20 minutes ago' "$dead/raw" "$dead"
+  FAKE_MODE=ok run lens "$D" 12 llm --target "$T/doc.md" --no-carryover >/dev/null 2>&1
+  check "scratch left by a hard-killed run is swept once stale" '[ ! -e "$dead" ]'
+  mkdir -p "$T/victim"; printf 'keep\n' > "$T/victim/keep.txt"
+  if MSYS=winsymlinks:nativestrict ln -s "$T/victim" "$TMPDIR/codex-run-$SKILL_NAME-999998-lnk" 2>/dev/null && [ -L "$TMPDIR/codex-run-$SKILL_NAME-999998-lnk" ]; then
+    touch -d '20 minutes ago' "$T/victim/keep.txt" "$T/victim"
+    touch -h -d '20 minutes ago' "$TMPDIR/codex-run-$SKILL_NAME-999998-lnk" 2>/dev/null
+    err="$(FAKE_MODE=ok run lens "$D" 12 llm --target "$T/doc.md" --no-carryover 2>&1 >/dev/null)"
+    check "the sweep skips a planted symlink (never follows it, does not even try)" '[ -e "$T/victim/keep.txt" ] && ! printf "%s" "$err" | grep -q "could not delete stale scratch"'
+    check "destroy_dir refuses a symlink; destroy removes a link without shredding its target" '! destroy_dir "$TMPDIR/codex-run-$SKILL_NAME-999998-lnk" && [ -e "$T/victim/keep.txt" ] && MSYS=winsymlinks:nativestrict ln -s "$T/victim/keep.txt" "$T/lnk-file" && destroy "$T/lnk-file" && [ ! -L "$T/lnk-file" ] && [ "$(cat "$T/victim/keep.txt")" = keep ]'
+    rm -f "$TMPDIR/codex-run-$SKILL_NAME-999998-lnk"
+  else
+    echo "skip symlink cases (no native symlinks here)"
+  fi
+  shim rm "*\"codex-run-$SKILL_NAME-\"*"
+  shim shred "*\"codex-run-$SKILL_NAME-\"*"
+  out="$(PATH="$T/shim-rm:$T/shim-shred:$PATH" FAKE_MODE=ok run lens "$D" 12 architect --target "$T/doc.md" --no-carryover 2>/dev/null)"
+  check "a scratch cleanup failure is recorded in the json and the summary line, not hidden" 'grep -q "\"cleanup_failed\":\"[^\"]*codex-run-$SKILL_NAME-[^\"]*/raw\"" "$D/$(r 12).architect.codex.txt.json" && printf "%s" "$out" | head -1 | grep -q "cleanup_failed=.*codex-run-$SKILL_NAME-"'
+  shim node '*'
+  PATH="$T/shim-node:$T/shim-rm:$T/shim-shred:$PATH" FAKE_MODE=ok run lens "$D" 12 enduser --target "$T/doc.md" --no-carryover >/dev/null 2>&1
+  check "... also in the fallback json written when parse-triad.js cannot run, which stays valid JSON" 'node -e "const j = JSON.parse(require(\"fs\").readFileSync(process.argv[1], \"utf8\")); process.exit(j.verdict === \"DEGRADED\" && /codex-run-/.test(j.cleanup_failed) ? 0 : 1)" "$D/$(r 12).enduser.codex.txt.json"'
+  rm -rf "$TMPDIR"/codex-run-"$SKILL_NAME"-*
   head -c 190000 /dev/zero | tr '\0' 'x' > "$T/big.md"; rm -f "$T/stdin"
   FAKE_MODE=ok run lens "$D" 13 llm --target "$T/big.md" --no-carryover >/dev/null 2>&1
   check "oversized prompt: degraded, codex never called" 'grep -q "^\[fallback: prompt-too-large\]" "$D/$(r 13).llm.codex.txt" && [ ! -e "$T/stdin" ]'
@@ -739,7 +884,27 @@ FAKE
   TRIAD_CODEX_EFFORT=High run lens "$D" 1 llm --target "$T/doc.md" >/dev/null 2>&1; [ $? -eq 2 ] || bad=1
   TRIAD_CODEX_SANDBOX=off run lens "$D" 1 llm --target "$T/doc.md" >/dev/null 2>&1; [ $? -eq 2 ] || bad=1
   check "usage errors exit 2: lens, round, target, credential files (target/context), timeout 0/00/571, effort, sandbox" '[ $bad -eq 0 ]'
-  check "this script holds no literal secret-shaped string (fixtures are assembled at runtime)" '[ -z "$(secret_strings "$SELF")" ]'
+
+  local sv
+  bad=0
+  for sv in 'EXAMPLE_API''_KEY=Zk81mQp2Lx7Rv0Tn' 'DUMMY_SERVICE_TO''KEN=Qm7Lx2Rv9Tn4Zk81' 'postgres:''//admin:S3cretPassw0rd@db/x'; do
+    printf '%s\n' "$sv" > "$T/s.txt"; has_secret "$T/s.txt" || bad=1
+  done
+  check "a key NAME that says example/dummy does not hide a real value" '[ $bad -eq 0 ]'
+  bad=0
+  for sv in 'API''_KEY=your_api_key_here' 'DB_PASS''WORD=changeme_please' 'TO''KEN=xxxxxxxxxxxx' 'postgres:''//admin:changeme123@db/x'; do
+    printf '%s\n' "$sv" > "$T/s.txt"; has_secret "$T/s.txt" && bad=1
+  done
+  check "a placeholder VALUE (your_..., changeme, xxxx, a changeme DSN password) is not a secret" '[ $bad -eq 0 ]'
+  printf '%s\n' 'API''_KEY=your_api_key_here' > "$T/s.txt"
+  shim sed '*'
+  ( PATH="$T/shim-sed:$PATH"; secret_strings "$T/s.txt" >/dev/null ); rc=$?
+  check "a failing filter stage fails closed (scan returns 2), never clean" '[ $rc -eq 2 ]'
+  printf '%s\n%s\n' "$FX_PEM_H" "$FX_PEM_A" > "$T/s.txt"
+  shim grep '*"-ohaE -e"*'
+  ( PATH="$T/shim-grep:$PATH"; secret_strings "$T/s.txt" >/dev/null ); rc=$?
+  check "a failing PEM body scan fails closed (scan returns 2)" '[ $rc -eq 2 ]'
+  check "this script holds no literal secret-shaped string (fixtures are assembled at runtime)" 'selfscan_clean "$SELF" && ! selfscan_clean "$SELF" "$T/missing-file"'
 
   # The sibling skill names its files differently; check from a copy.
   other=triad-codex; [ "$SKILL_NAME" = triad-all ] || other=triad-all
