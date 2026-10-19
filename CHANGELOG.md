@@ -5,6 +5,95 @@ All notable changes to the Triad plugin are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.3.3] - 2026-10-19
+
+Fixes from a /prism-all review of 0.3.2 (triad PR #7), Claude and Codex with 5 lenses each:
+30 candidates, 23 supported by quoted code and machine-checked, none HIGH. Some 0.3.2 notes
+claimed more than the code did; corrections are marked below.
+
+### Fixed
+- **Documented example values were quarantined again** (0.3.2 regression, MED). The value-only
+  placeholder test skipped values that 0.3.1 had dropped:
+  - shell defaults: `${POSTGRES_PASSWORD:-changeme}`, `DB_PASSWORD:=changeme123`
+  - a vendor prefix followed only by x or *: `AKIAXXXXXXXXXXXXXXXX`, `ghp_xxxx…`,
+    `sk-proj-xxxx…`, `xoxb-xxxx-xxxx`
+  - AWS's `…EXAMPLE` and `…EXAMPLEKEY` values
+
+  A reviewer quoting one of these in a suggested fix turned the lens into a security incident.
+  They are dropped again.
+- **"Whole value is a placeholder" was really a prefix test** (MED in effect; the 0.3.2 note
+  overstated the fix). `API_KEY=your_Zk81mQp2…`, `DB_PASSWORD=ExampleCorp2024Secret` and
+  `postgres://u:dummyZk81…@` were dropped as examples. A placeholder word may now be followed
+  only by more words (`your_api_key_here`, `changeme_please`) or only by digits (`changeme123`).
+- **Lock reclaim race not closed** (MED; the 0.3.2 note "two runs cannot both take it" was
+  wrong). The slower of two attempts that found the same abandoned lock could rename away the
+  lock the faster one had just re-created. Reclaim now happens under a second lock
+  (`<out>.lock.reclaim`), and the lock is checked again once that is held.
+- **A late interrupt could replace a finished answer** (0.3.2 regression). The raw stream was
+  shredded while the interrupt handler was still armed. The handler is now disarmed before
+  cleanup. A signal that arrives while Codex and the watchdog are starting is held until their
+  pids are known, so the handler can stop them; before, it could leave Codex running.
+- **`cleanup_failed` missed the scratch dir** (0.3.2 overstated it). The scratch dir was deleted
+  only on exit, after the JSON and summary had been written. It is now deleted before publishing.
+  A failure sets `cleanup_failed`, adds `,cleanup-failed` to a `secret-scrubbed(...)` status, and
+  adds a CLEANUP FAILED line to a security marker. The summary line quotes the path.
+- Fail-closed gaps in the scan and sweep:
+  - A failing `sort` in `new_secret_in` returned "clean".
+  - A failing `find` in the stale-scratch sweep counted as "nothing recent", so the dir was
+    deleted. It now counts as recent.
+  - An unreadable mtime made a pid-less lock look new forever. It now counts as old.
+- **An interrupt could still lose a security incident or a cleanup report** (LOW):
+  - A signal that came while the scan was deciding on a leak ran the handler before the leak was
+    recorded, so the run read as an ordinary interrupt. Signals are now held until the verdict is
+    recorded. A scan that fails meanwhile counts as interrupted, not `scan-failed`, because a
+    Ctrl-C also kills the scan's grep.
+  - A second, different signal re-entered the interrupt handler halfway (bash nests handlers for
+    different signals) and could drop the CLEANUP FAILED report. The handler now ignores further
+    signals.
+- **A marker could be read as a verdict** (LOW; needs control of TMPDIR). The JSON of a run that
+  is not `ok` is now always DEGRADED, whatever text its marker embeds (for example a scratch path
+  holding newlines and a findings fence).
+- `cr_exit` warns when another attempt took the lock over. Before, it stayed silent.
+- The fallback JSON (written when parse-triad.js cannot run) now blanks control characters in
+  `cleanup_failed`.
+- SKILL.md (triad-all, triad-codex):
+  - `scan-failed` (status `secret-scrubbed(scan-failed)`) is never auto-retried: tell the user,
+    and re-run once the disk or permissions are fixed. 0.3.2 also told the model to re-run it,
+    which contradicted the fallback table.
+  - After exit 130, read the JSON `status` before re-running.
+  - The takeover warning is described.
+
+### Changed (selftest, 54 → 69 in triad-all)
+- The two symlink cases now run on Git Bash without Developer Mode, using `MSYS=winsymlinks:sys`.
+  In 0.3.2 they were silently skipped there. Cases this machine still cannot run count as
+  "skipped" in the last line.
+- Mtimes are moved back with `touch -t` (GNU or BSD `date`), so the lock and sweep cases also run
+  on macOS. "Dead" pids are reaped children, not hard-coded 999999.
+- The portable-watchdog check runs with a 40 s kill grace (test-only `_CODEX_RUN_KILL_GRACE`).
+  The 18 s bound from 0.3.2 no longer hid a watchdog that holds the caller's pipe.
+- The quarantine-interrupt case waits on a handshake instead of a fixed 3 s sleep.
+- New cases:
+  - a late reclaimer
+  - a reclaim already in progress
+  - takeover warning
+  - unreadable mtime
+  - failing `find`
+  - failing `sort`
+  - interrupt with an undeletable scratch dir
+  - leak path with an undeletable scratch dir
+  - fallback-JSON escaping
+  - the placeholder forms above, in both directions
+  - an interrupt while the scan decides, and a scan that fails during it
+  - a second signal during the interrupt handler
+  - an old scratch dir with a recently written file in it
+  - a marker that embeds a findings fence
+
+### Not fixed (suspected, no confirmed precondition)
+- `[ -O ]` might be false for the user's own dirs on some Windows setups: none seen.
+- The `destroy_dir` check-then-use window needs a shared TMPDIR without the sticky bit.
+- mawk 1.3.3 might not support `[[:space:]]`; that case fails closed.
+- A prompt file deleted mid-run under `TRIAD_CODEX_SANDBOX=bypass`.
+
 ## [0.3.2] - 2026-10-18
 
 Security fixes in the shared safety core of `codex-run.sh`, ported from mangchi 0.4.0
